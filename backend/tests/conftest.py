@@ -16,7 +16,7 @@ pytest-xdist не используется (общая БД на процесс)
 
 import asyncio
 import os
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 
 import asyncpg
 import pytest
@@ -107,3 +107,15 @@ async def client() -> AsyncIterator[AsyncClient]:
     app = create_app()
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         yield c
+
+
+@pytest.fixture
+def relative_urls(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Режим продакшена: без S3_PUBLIC_ENDPOINT ссылки относительные, подпись на
+    SIGNING_HOST (ADR 0004, дополнение 1). Кэш клиента подписи — заново до и после."""
+    from app.core import storage
+
+    monkeypatch.setattr(get_settings(), "s3_public_endpoint", None)
+    storage._presign_client.cache_clear()
+    yield
+    storage._presign_client.cache_clear()

@@ -7,6 +7,7 @@
 import threading
 from datetime import datetime
 from functools import lru_cache
+from urllib.parse import urlsplit, urlunsplit
 
 import boto3
 from botocore.client import BaseClient
@@ -18,6 +19,11 @@ from app.core.config import get_settings
 # Сессия boto3 по умолчанию не потокобезопасна при создании клиентов,
 # а первый вызов может прийти одновременно из нескольких потоков (asyncio.to_thread).
 _lock = threading.Lock()
+
+# Host, на который подписываются ссылки при относительных URL (ADR 0004, дополнение 1).
+# Константа, а не настройка: обязан совпадать с `proxy_set_header Host` в
+# infra/nginx/storage-proxy.conf, и расходиться им незачем.
+SIGNING_HOST = "media.internal"
 
 
 def _client(endpoint_url: str, *, read_timeout: float, attempts: int) -> BaseClient:
@@ -66,14 +72,32 @@ def check_buckets() -> None:
 # --- Операции с объектами (блокирующие: вызывать через asyncio.to_thread) ---------------
 
 
-@lru_cache(maxsize=32)
-def _presign_client(endpoint_url: str) -> BaseClient:
-    """Клиент только для подписи URL (сетевых запросов не делает).
+def _signing_endpoint() -> str:
+    """Адрес, на который подписываются ссылки для клиента (ADR 0004, дополнение 1).
 
-    Подпись SigV4 включает host, поэтому подписываем на адрес, по которому к хранилищу
-    обратится клиент. Кэш ограничен: endpoint строится из заголовка Host запроса.
+    По умолчанию — постоянный внутренний host (SIGNING_HOST): nginx в /yt-raw/ и /yt-media/
+    передаёт хранилищу именно его, а клиент получает относительный URL и ходит на тот же
+    origin, что и SPA. Host запроса в подпись не попадает — один клиент на процесс.
+    S3_PUBLIC_ENDPOINT (автотесты: клиент ходит в хранилище напрямую) — абсолютные ссылки.
     """
+    settings = get_settings()
+    if settings.s3_public_endpoint:
+        return settings.s3_public_endpoint.rstrip("/")
+    return f"http://{SIGNING_HOST}"
+
+
+@lru_cache(maxsize=2)
+def _presign_client(endpoint_url: str) -> BaseClient:
+    """Клиент только для подписи URL (сетевых запросов не делает). Ключ кэша — из конфигурации,
+    не из запроса: создание клиента стоит ~0,35 с CPU."""
     return _client(endpoint_url, read_timeout=5, attempts=1)
+
+
+def _for_client(url: str) -> str:
+    if get_settings().s3_public_endpoint:
+        return url
+    parts = urlsplit(url)
+    return urlunsplit(("", "", parts.path, parts.query, ""))
 
 
 def create_multipart_upload(bucket: str, key: str) -> str:
@@ -85,23 +109,25 @@ def create_multipart_upload(bucket: str, key: str) -> str:
 
 
 def presign_upload_parts(
-    endpoint_url: str, bucket: str, key: str, upload_id: str, sizes: list[int], ttl: int
+    bucket: str, key: str, upload_id: str, sizes: list[int], ttl: int
 ) -> list[str]:
     """Ссылки на части. Content-Length каждой части входит в подпись: хранилище отклонит
     часть любой другой длины (SignatureDoesNotMatch). Сумма частей = заявленный размер —
     загрузить больше заявленного (до complete) физически нельзя."""
-    client = _presign_client(endpoint_url)
+    client = _presign_client(_signing_endpoint())
     return [
-        client.generate_presigned_url(
-            "upload_part",
-            Params={
-                "Bucket": bucket,
-                "Key": key,
-                "UploadId": upload_id,
-                "PartNumber": n,
-                "ContentLength": size,
-            },
-            ExpiresIn=ttl,
+        _for_client(
+            client.generate_presigned_url(
+                "upload_part",
+                Params={
+                    "Bucket": bucket,
+                    "Key": key,
+                    "UploadId": upload_id,
+                    "PartNumber": n,
+                    "ContentLength": size,
+                },
+                ExpiresIn=ttl,
+            )
         )
         for n, size in enumerate(sizes, start=1)
     ]

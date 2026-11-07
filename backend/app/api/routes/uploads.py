@@ -1,11 +1,8 @@
-import re
 import uuid
 
-from fastapi import APIRouter, Request, Response, status
+from fastapi import APIRouter, Response, status
 
 from app.api.deps import CurrentUser, DbSession
-from app.core.config import get_settings
-from app.core.errors import BadRequest
 from app.schemas.common import err
 from app.schemas.uploads import (
     UploadCompleteIn,
@@ -23,26 +20,6 @@ router = APIRouter(
 )
 
 
-# host или host:port; IPv6 в квадратных скобках. Иное (пробелы, мусор) — 400, а не 500 из boto.
-_HOST_RE = re.compile(r"^(?:[A-Za-z0-9.-]{1,253}|\[[0-9A-Fa-f:.]{2,45}\])(?::\d{1,5})?$")
-
-
-def public_storage_endpoint(request: Request) -> str:
-    """Адрес хранилища, на который подписываются URL для клиента (ADR 0004).
-
-    По умолчанию — тот же origin, что у запроса: nginx проксирует /yt-raw/ в хранилище,
-    сохраняя Host (он входит в подпись). Подделанный Host даст подпись только для того,
-    кто его прислал, — чужому пользователю такую ссылку не выдать.
-    """
-    configured = get_settings().s3_public_endpoint
-    if configured:
-        return configured.rstrip("/")
-    host = request.headers.get("host", "")
-    if not _HOST_RE.match(host):
-        raise BadRequest("Некорректный заголовок Host")
-    return f"{request.url.scheme}://{host}"
-
-
 @router.post(
     "",
     status_code=status.HTTP_201_CREATED,
@@ -53,10 +30,8 @@ def public_storage_endpoint(request: Request) -> str:
         409: err("Слишком много незавершённых загрузок"),
     },
 )
-async def start_upload(
-    data: UploadCreateIn, request: Request, user: CurrentUser, db: DbSession
-) -> UploadCreateOut:
-    started = await uploads_service.start_upload(db, user, data, public_storage_endpoint(request))
+async def start_upload(data: UploadCreateIn, user: CurrentUser, db: DbSession) -> UploadCreateOut:
+    started = await uploads_service.start_upload(db, user, data)
     return UploadCreateOut(
         video_id=started.video_id,
         part_size=started.part_size,

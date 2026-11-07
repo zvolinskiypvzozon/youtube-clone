@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core import storage
 from app.core.config import get_settings
 from app.core.db import get_sessionmaker
-from app.core.errors import BadRequest, Conflict
+from app.core.errors import Conflict
 from app.models import (
     Job,
     JobStatus,
@@ -371,26 +371,7 @@ async def test_cannot_cancel_completed_upload(client: AsyncClient) -> None:
     assert r.status_code == 409
 
 
-# --- подпись URL -----------------------------------------------------------------------
-
-
-def test_presigned_host_follows_request_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Без S3_PUBLIC_ENDPOINT URL подписывается на origin запроса (nginx, ADR 0004)."""
-    from starlette.requests import Request
-
-    from app.api.routes.uploads import public_storage_endpoint
-
-    monkeypatch.setattr(get_settings(), "s3_public_endpoint", None)
-    scope = {
-        "type": "http",
-        "scheme": "http",
-        "method": "POST",
-        "path": "/api/uploads",
-        "headers": [(b"host", b"192.168.1.50:8080")],
-        "server": ("api", 8000),
-        "query_string": b"",
-    }
-    assert public_storage_endpoint(Request(scope)) == "http://192.168.1.50:8080"
+# --- лимит загрузок: гонки ------------------------------------------------------------
 
 
 async def test_concurrent_starts_respect_limit(client: AsyncClient) -> None:
@@ -422,9 +403,7 @@ async def test_concurrent_starts_respect_limit(client: AsyncClient) -> None:
         )
 
         data = UploadCreateIn(**_meta(1000))
-        t2_task = asyncio.create_task(
-            uploads_service.start_upload(t2, owner, data, "http://storage:9000")
-        )
+        t2_task = asyncio.create_task(uploads_service.start_upload(t2, owner, data))
         await asyncio.sleep(0.5)
         await t1.commit()
         with pytest.raises(Conflict):
@@ -455,21 +434,22 @@ async def test_processing_occupies_slot_failed_does_not(
     ).status_code == 201
 
 
-@pytest.mark.parametrize("host", ["bad host", "x:99999999", "a/b", ""])
-def test_invalid_host_rejected_before_signing(host: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    from starlette.requests import Request
+# --- подпись ссылок (ADR 0004, дополнение 1) ---------------------------------------------
 
-    from app.api.routes.uploads import public_storage_endpoint
 
-    monkeypatch.setattr(get_settings(), "s3_public_endpoint", None)
-    scope = {
-        "type": "http",
-        "scheme": "http",
-        "method": "POST",
-        "path": "/api/uploads",
-        "headers": [(b"host", host.encode())],
-        "server": ("api", 8000),
-        "query_string": b"",
+async def test_upload_part_urls_are_relative(client: AsyncClient, relative_urls: None) -> None:
+    user = await new_user(client)
+    payload = b"x" * 1000
+    meta = {
+        "title": "относительные ссылки",
+        "visibility": "public",
+        "content_type": "video/mp4",
+        "size_bytes": len(payload),
     }
-    with pytest.raises(BadRequest):
-        public_storage_endpoint(Request(scope))
+    r = await client.post("/api/uploads", json=meta, headers=user["auth"])
+    assert r.status_code == 201, r.text
+    part = r.json()["parts"][0]
+    assert part["url"].startswith(f"/{get_settings().s3_bucket_raw}/raw/")
+    async with httpx.AsyncClient(base_url="http://storage:9000") as raw:
+        put = await raw.put(part["url"], content=payload, headers={"Host": storage.SIGNING_HOST})
+        assert put.status_code == 200, put.text

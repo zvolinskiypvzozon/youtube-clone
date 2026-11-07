@@ -58,9 +58,7 @@ def part_sizes(size_bytes: int, part_size: int) -> list[int]:
     return [part_size] * (count - 1) + [size_bytes - part_size * (count - 1)]
 
 
-async def start_upload(
-    db: AsyncSession, user: User, data: UploadCreateIn, public_endpoint: str
-) -> StartedUpload:
+async def start_upload(db: AsyncSession, user: User, data: UploadCreateIn) -> StartedUpload:
     settings = get_settings()
     if data.size_bytes > settings.max_upload_bytes:
         raise BadRequest(TOO_LARGE)
@@ -88,7 +86,6 @@ async def start_upload(
         # Подпись — до commit: если она упадёт, не останется видео в uploading без ссылок.
         urls = await asyncio.to_thread(
             storage.presign_upload_parts,
-            public_endpoint,
             bucket,
             key,
             upload_id,
