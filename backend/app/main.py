@@ -7,6 +7,7 @@ from app.api.router import api_router
 from app.core.config import get_settings
 from app.core.errors import install_error_handlers
 from app.core.logging import setup_logging
+from app.core.openapi import install_openapi
 
 UNSAFE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
@@ -45,6 +46,7 @@ def create_app() -> FastAPI:
     install_error_handlers(app)
     app.middleware("http")(reject_cross_origin)
     app.include_router(api_router)
+    install_openapi(app)
     return app
 
 

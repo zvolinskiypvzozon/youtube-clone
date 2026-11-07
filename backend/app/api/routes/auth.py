@@ -59,7 +59,7 @@ def _clear_auth_cookies(response: Response) -> None:
     status_code=status.HTTP_201_CREATED,
     response_model=MeOut,
     summary="Регистрация (создаёт канал и сразу выполняет вход)",
-    responses={409: err("Email или имя уже заняты"), 422: err("Неверный формат полей")},
+    responses={409: err("Email или имя уже заняты")},
 )
 async def register(data: RegisterIn, request: Request, response: Response, db: DbSession) -> MeOut:
     result = await auth_service.register(
