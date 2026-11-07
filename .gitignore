@@ -1,0 +1,23 @@
+# Секреты
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.ruff_cache/
+
+# Node
+node_modules/
+dist/
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+
+# Локальные настройки Claude Code (личные; общие — .claude/settings.json)
+.claude/settings.local.json
