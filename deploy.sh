@@ -101,6 +101,7 @@ HTTP_PORT="$(grep -E '^HTTP_PORT=' .env | cut -d= -f2 || true)"
 HTTP_PORT="${HTTP_PORT:-80}"
 
 log "Собираю и запускаю стек (первый запуск — несколько минут)"
+DEPLOY_STARTED="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 if ! docker compose up -d --build --remove-orphans; then
   diagnostics
   fail "не удалось запустить стек (см. логи выше)"
@@ -136,3 +137,27 @@ cat <<EOF
   Health:      http://${IP:-localhost}${PORT_SUFFIX}/api/health
 
 EOF
+
+# Администратор. Пароль показываем, только если bootstrap создал администратора именно в этом
+# запуске (маркер в логе migrate) и вывод идёт в терминал — не в лог CI/cloud-init/tee.
+env_value() { grep -E "^$1=" .env | cut -d= -f2- || true; }
+ADMIN_USERNAME="$(env_value ADMIN_USERNAME)"
+ADMIN_CREATED=0
+docker compose logs --no-log-prefix --since "$DEPLOY_STARTED" migrate 2>/dev/null \
+  | grep -q "bootstrap admin: создан" && ADMIN_CREATED=1
+if [[ $ADMIN_CREATED -eq 1 && -t 1 ]]; then
+  cat <<EOF
+  Администратор:  ${ADMIN_USERNAME}
+  Пароль:         $(env_value ADMIN_PASSWORD)
+  (показан один раз; хранится в .env, переменная ADMIN_PASSWORD)
+
+EOF
+else
+  echo "  Администратор: ${ADMIN_USERNAME}"
+  echo "  Пароль: sudo grep ADMIN_PASSWORD $(pwd)/.env"
+  echo
+fi
+
+# Одноразовые контейнеры (migrate, storage-init) держат секреты в окружении
+# (видны в docker inspect) — после успешного деплоя удаляем их.
+docker compose rm -f migrate storage-init >/dev/null 2>&1 || true

@@ -36,6 +36,11 @@ ensure APP_DB_PASSWORD "$(rand 24)"
 
 ensure SECRET_KEY "$(rand 32)"
 
+# Первый администратор: создаётся сервисом migrate, если его ещё нет.
+ensure ADMIN_USERNAME admin
+ensure ADMIN_EMAIL admin@example.com
+ensure ADMIN_PASSWORD "$(rand 12)"
+
 ensure STORAGE_ROOT_USER "root-$(rand 4)"
 ensure STORAGE_ROOT_PASSWORD "$(rand 24)"
 ensure S3_ACCESS_KEY yt-app
