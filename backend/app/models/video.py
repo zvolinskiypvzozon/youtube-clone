@@ -95,7 +95,7 @@ class Video(UUIDPk, Timestamps, Base):
     moderation_reason: Mapped[str | None] = mapped_column(Text)
     failure_reason: Mapped[str | None] = mapped_column(Text)
 
-    # Заявленный при загрузке размер; фактический проверяет worker.
+    # Заявленный при загрузке размер; фактический сверяется при complete загрузки.
     size_bytes: Mapped[int | None] = mapped_column(BigInteger)
     duration_seconds: Mapped[int | None] = mapped_column(Integer)
     # Идентификатор S3 multipart upload, пока статус uploading.

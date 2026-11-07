@@ -49,6 +49,10 @@ services:
       MINIO_ROOT_USER: ${STORAGE_ROOT_USER:?}
       MINIO_ROOT_PASSWORD: ${STORAGE_ROOT_PASSWORD:?}
       MINIO_BROWSER: "off"
+      # Брошенные multipart-загрузки (вкладку закрыли, сеть упала) хранилище удаляет само
+      # через сутки; строки видео в uploading чистит периодическая задача worker.
+      MINIO_API_STALE_UPLOADS_EXPIRY: 24h
+      MINIO_API_STALE_UPLOADS_CLEANUP_INTERVAL: 6h
     volumes:
       - storagedata:/data
     healthcheck:
@@ -146,6 +150,8 @@ services:
       APP_DB_PASSWORD: ${APP_DB_PASSWORD:?}
       S3_BUCKET_RAW: yt-test-raw
       S3_BUCKET_MEDIA: yt-test-media
+      # Тесты грузят части напрямую в хранилище (без nginx) — подписываем на его адрес.
+      S3_PUBLIC_ENDPOINT: http://storage:9000
     depends_on:
       migrate:
         condition: service_completed_successfully
