@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "Bash(docker compose ps:*)",
+      "Bash(docker compose logs:*)",
+      "Bash(docker compose build:*)",
+      "Bash(docker compose up:*)",
+      "Bash(docker compose --profile test build:*)",
+      "Bash(docker compose --profile test run --rm tests:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git show:*)",
+      "Bash(git add:*)",
+      "Bash(npm run build:*)",
+      "Bash(npm run typecheck:*)",
+      "Bash(.venv/bin/ruff:*)"
+    ],
+    "ask": [
+      "Bash(git commit:*)",
+      "Bash(git reset:*)",
+      "Bash(git rebase:*)",
+      "Bash(git checkout -- :*)",
+      "Bash(npm ci:*)",
+      "Bash(npm install:*)",
+      "Bash(docker compose down:*)"
+    ],
+    "deny": [
+      "Read(./.env)",
+      "Read(**/.env)",
+      "Bash(cat .env)", "Bash(cat .env *)", "Bash(cat * .env)", "Bash(cat * .env *)",
+      "Bash(cat ./.env)", "Bash(cat ./.env *)", "Bash(cat * ./.env)", "Bash(cat * ./.env *)",
+      "Bash(head .env)", "Bash(head .env *)", "Bash(head * .env)", "Bash(head * .env *)",
+      "Bash(head ./.env)", "Bash(head ./.env *)", "Bash(head * ./.env)", "Bash(head * ./.env *)",
+      "Bash(tail .env)", "Bash(tail .env *)", "Bash(tail * .env)", "Bash(tail * .env *)",
+      "Bash(tail ./.env)", "Bash(tail ./.env *)", "Bash(tail * ./.env)", "Bash(tail * ./.env *)",
+      "Bash(less .env)", "Bash(less .env *)", "Bash(less * .env)", "Bash(less * .env *)",
+      "Bash(less ./.env)", "Bash(less ./.env *)", "Bash(less * ./.env)", "Bash(less * ./.env *)",
+      "Bash(more .env)", "Bash(more .env *)", "Bash(more ./.env)", "Bash(more ./.env *)",
+      "Bash(grep * .env)", "Bash(grep * .env *)", "Bash(grep * ./.env)", "Bash(grep * ./.env *)",
+      "Bash(sed * .env)", "Bash(sed * .env *)", "Bash(sed * ./.env)", "Bash(sed * ./.env *)",
+      "Bash(awk * .env)", "Bash(awk * .env *)", "Bash(awk * ./.env)", "Bash(awk * ./.env *)",
+      "Bash(source .env)", "Bash(source ./.env)", "Bash(. .env)", "Bash(. ./.env)",
+      "Bash(git add -f:*)",
+      "Bash(git add --force:*)",
+      "Bash(git push:*)",
+      "Bash(docker compose down -v:*)",
+      "Bash(docker compose * down -v*)",
+      "Bash(docker volume rm:*)"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/ruff_on_edit.py\"",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}
