@@ -4,15 +4,18 @@
 #
 # Идемпотентен: повторный запуск пересобирает и перезапускает стек, данные и .env сохраняются.
 # Опции:
-#   --no-seed   не загружать демо-данные
+#   --no-seed              не загружать демо-данные
+#   --skip-network-check   не проверять DNS и интернет перед стартом
 set -euo pipefail
 
 SELF="$(readlink -f "$0")"
 
 SEED=1
+NET_CHECK=1
 for arg in "$@"; do
   case "$arg" in
     --no-seed) SEED=0 ;;
+    --skip-network-check) NET_CHECK=0 ;;
     -h|--help) sed -n '2,8p' "$SELF"; exit 0 ;;
     *) echo "Неизвестный аргумент: $arg" >&2; exit 2 ;;
   esac
@@ -34,6 +37,12 @@ diagnostics() {
 
 if ! grep -qi '^ID=ubuntu' /etc/os-release 2>/dev/null; then
   log "Внимание: скрипт рассчитан на Ubuntu 24.04, продолжаю на свой риск"
+fi
+
+# До любых установок: без DNS и интернета дальше всё равно упадём, но с невнятной ошибкой apt/docker.
+if [[ $NET_CHECK -eq 1 ]]; then
+  log "Проверяю DNS и доступ в интернет"
+  bash scripts/check-network.sh || fail "нет сети или DNS (подробности выше)"
 fi
 
 # Сразу после загрузки ВМ unattended-upgrades держит блокировку dpkg — ждём её, а не падаем.
