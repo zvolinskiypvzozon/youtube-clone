@@ -28,7 +28,10 @@ from app.models import User, Video, VideoFileKind, VideoStatus
 from app.repositories import videos as videos_repo
 from app.schemas.uploads import UploadCreateIn
 
-TOO_MANY_UPLOADS = "Слишком много незавершённых загрузок. Завершите или отмените одну из них"
+TOO_MANY_UPLOADS = (
+    "Слишком много видео в загрузке или обработке. Дождитесь окончания обработки "
+    "или отмените незавершённую загрузку"
+)
 TOO_LARGE = "Файл слишком большой"
 NOT_FOUND = "Загрузка не найдена"
 ALREADY_DONE = "Загрузка уже завершена или отменена"

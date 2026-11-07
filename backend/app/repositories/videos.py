@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
@@ -26,8 +26,12 @@ async def lock_channel(db: AsyncSession, channel_id: uuid.UUID) -> None:
 
 
 async def count_active_uploads(db: AsyncSession, channel_id: uuid.UUID) -> int:
+    """Видео канала «в работе»: загружаются или обрабатываются. Лимит на оба статуса —
+    иначе один пользователь мог бы завершать загрузки одну за другой и занять очередь
+    единственного worker-а."""
     stmt = select(func.count()).where(
-        Video.channel_id == channel_id, Video.status == VideoStatus.uploading
+        Video.channel_id == channel_id,
+        Video.status.in_([VideoStatus.uploading, VideoStatus.processing]),
     )
     return await db.scalar(stmt) or 0
 
@@ -102,3 +106,72 @@ async def enqueue_processing(db: AsyncSession, video_id: uuid.UUID) -> Job:
     db.add(job)
     await db.flush()
     return job
+
+
+async def get_original(db: AsyncSession, video_id: uuid.UUID) -> VideoFile | None:
+    return await db.scalar(
+        select(VideoFile).where(
+            VideoFile.video_id == video_id, VideoFile.kind == VideoFileKind.original
+        )
+    )
+
+
+async def delete_original(db: AsyncSession, video_id: uuid.UUID) -> None:
+    await db.execute(
+        delete(VideoFile).where(
+            VideoFile.video_id == video_id, VideoFile.kind == VideoFileKind.original
+        )
+    )
+
+
+async def lock_video(db: AsyncSession, video_id: uuid.UUID) -> Video | None:
+    return await db.scalar(select(Video).where(Video.id == video_id).with_for_update())
+
+
+async def delete_stale_uploads(
+    db: AsyncSession, older_than_hours: int, limit: int = 100
+) -> list[tuple[uuid.UUID, str | None]]:
+    """Удаляет брошенные загрузки и возвращает (id, upload_id) удалённых.
+
+    Условие status='uploading' в самом DELETE: видео, которое пользователь успел завершить
+    (перешло в processing), не удалится, и его исходник в хранилище останется нетронутым —
+    вызывающий чистит хранилище только для возвращённых строк, ПОСЛЕ commit."""
+    stale = (
+        select(Video.id)
+        .where(
+            Video.status == VideoStatus.uploading,
+            Video.created_at < func.now() - func.make_interval(0, 0, 0, 0, older_than_hours),
+        )
+        .limit(limit)
+        .scalar_subquery()
+    )
+    result = await db.execute(
+        delete(Video)
+        .where(Video.id.in_(stale), Video.status == VideoStatus.uploading)
+        .returning(Video.id, Video.upload_id)
+    )
+    return [(row.id, row.upload_id) for row in result.all()]
+
+
+async def referenced_media_prefixes(db: AsyncSession, bucket: str) -> set[str]:
+    """Префиксы videos/{id}/{token}/, на которые ссылаются строки video_files."""
+    keys = await db.scalars(select(VideoFile.s3_key).where(VideoFile.bucket == bucket))
+    return {key.rsplit("/", 1)[0] + "/" for key in keys}
+
+
+async def original_keys(db: AsyncSession, video_ids: list[uuid.UUID]) -> list[tuple[str, str]]:
+    if not video_ids:
+        return []
+    stmt = select(VideoFile.bucket, VideoFile.s3_key).where(
+        VideoFile.video_id.in_(video_ids), VideoFile.kind == VideoFileKind.original
+    )
+    return [(row.bucket, row.s3_key) for row in (await db.execute(stmt)).all()]
+
+
+async def delete_originals(db: AsyncSession, video_ids: list[uuid.UUID]) -> None:
+    if video_ids:
+        await db.execute(
+            delete(VideoFile).where(
+                VideoFile.video_id.in_(video_ids), VideoFile.kind == VideoFileKind.original
+            )
+        )

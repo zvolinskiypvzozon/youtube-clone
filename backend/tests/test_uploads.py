@@ -431,14 +431,28 @@ async def test_concurrent_starts_respect_limit(client: AsyncClient) -> None:
             await t2_task
 
 
-async def test_processing_and_failed_do_not_occupy_upload_slots(client: AsyncClient) -> None:
+async def test_processing_occupies_slot_failed_does_not(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    """Лимит считает видео «в работе» (uploading + processing): иначе пользователь занял бы
+    очередь единственного worker-а, завершая загрузки одну за другой."""
     user = await new_user(client)
+    limit = get_settings().max_active_uploads
     payload = os.urandom(1000)
-    upload = await _start(client, user["auth"], len(payload))
-    parts = await _put_parts(upload, payload)
-    assert (await _complete(client, user["auth"], upload["video_id"], parts)).status_code == 200
-    for _ in range(get_settings().max_active_uploads):  # processing слот не занимает
+    first = await _start(client, user["auth"], len(payload))
+    parts = await _put_parts(first, payload)
+    assert (await _complete(client, user["auth"], first["video_id"], parts)).status_code == 200
+    for _ in range(limit - 1):
         await _start(client, user["auth"], 1000)
+    r = await client.post("/api/uploads", json=_meta(1000), headers=user["auth"])
+    assert r.status_code == 409  # processing занимает слот
+
+    video = await db.get(Video, uuid.UUID(first["video_id"]))
+    video.status = VideoStatus.failed
+    await db.commit()
+    assert (
+        await client.post("/api/uploads", json=_meta(1000), headers=user["auth"])
+    ).status_code == 201
 
 
 @pytest.mark.parametrize("host", ["bad host", "x:99999999", "a/b", ""])

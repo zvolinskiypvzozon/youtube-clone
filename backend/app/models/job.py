@@ -23,7 +23,8 @@ class Job(UUIDPk, Timestamps, Base):
         0 строк → задачу уже перехватил другой worker (наш lease истёк): результат отбрасываем.
 
     Возврат задач упавшего worker (lease истёк):
-        attempts < max_attempts  → status='queued', locked_by=NULL, run_after = now() + backoff;
+        attempts < max_attempts  → status='queued', locked_by=NULL, run_after = now()
+                                   (сам факт падения worker-а — не повод для паузы);
         attempts >= max_attempts → status='failed' (и видео → failed) — отдельным UPDATE,
         иначе CHECK attempts_range не даст вернуть задачу в очередь.
     """

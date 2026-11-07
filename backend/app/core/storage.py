@@ -5,6 +5,7 @@
 """
 
 import threading
+from datetime import datetime
 from functools import lru_cache
 
 import boto3
@@ -144,3 +145,25 @@ def error_code(exc: ClientError) -> str:
 
 def delete_object(bucket: str, key: str) -> None:
     get_s3().delete_object(Bucket=bucket, Key=key)
+
+
+def download_file(bucket: str, key: str, path: str) -> None:
+    get_s3().download_file(bucket, key, path)
+
+
+def upload_file(path: str, bucket: str, key: str, content_type: str) -> None:
+    get_s3().upload_file(path, bucket, key, ExtraArgs={"ContentType": content_type})
+
+
+def delete_objects(bucket: str, keys: list[str]) -> None:
+    for key in keys:
+        delete_object(bucket, key)
+
+
+def list_objects(bucket: str, prefix: str) -> list[tuple[str, datetime]]:
+    """(ключ, время изменения) всех объектов с префиксом."""
+    paginator = get_s3().get_paginator("list_objects_v2")
+    result: list[tuple[str, datetime]] = []
+    for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+        result.extend((o["Key"], o["LastModified"]) for o in page.get("Contents", []))
+    return result

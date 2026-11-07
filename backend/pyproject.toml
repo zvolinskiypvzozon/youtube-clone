@@ -19,7 +19,7 @@ known-first-party = ["app"]
 known-third-party = ["alembic"]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S101", "S105", "S106"]
+"tests/**" = ["S101", "S105", "S106", "S603", "S607"]  # assert, тестовые пароли, ffmpeg в тестах
 "alembic/**" = ["E501"]
 
 [tool.pytest.ini_options]

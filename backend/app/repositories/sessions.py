@@ -57,5 +57,10 @@ async def delete_by_hash(db: AsyncSession, token_hash: bytes) -> None:
     await db.execute(delete(UserSession).where(UserSession.token_hash == token_hash))
 
 
+async def delete_expired(db: AsyncSession) -> int:
+    result = await db.execute(delete(UserSession).where(UserSession.expires_at < func.now()))
+    return result.rowcount or 0
+
+
 async def delete_all_for_user(db: AsyncSession, user_id: uuid.UUID) -> None:
     await db.execute(delete(UserSession).where(UserSession.user_id == user_id))

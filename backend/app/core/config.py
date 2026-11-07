@@ -34,6 +34,18 @@ class Settings(BaseSettings):
     upload_url_ttl_seconds: int = 3600
     max_active_uploads: int = 3  # незавершённых загрузок на пользователя
 
+    # Worker (ADR 0003)
+    worker_poll_seconds: float = 2.0
+    worker_lease_seconds: int = 15 * 60
+    worker_heartbeat_seconds: int = 60
+    worker_retry_base_seconds: int = 30  # пауза перед повтором: base * 2^(попытка-1)
+    worker_maintenance_seconds: int = 300  # периодические задачи
+    stale_upload_hours: int = 24  # незавершённые загрузки старше — удаляются
+    # Объекты yt-media без ссылок из БД старше порога удаляются. Порог > lease (15 мин):
+    # объекты обрабатываемой задачи получают ссылки только при финализации.
+    orphan_media_minutes: int = 120
+    ffmpeg_threads: int = 2
+
     health_timeout_seconds: float = 2.0
 
     # Сессии (ADR 0005)
