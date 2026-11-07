@@ -21,7 +21,10 @@
       "Bash(git commit:*)",
       "Bash(git reset:*)",
       "Bash(git rebase:*)",
-      "Bash(git checkout -- :*)",
+      "Bash(git checkout:*)",
+      "Bash(git restore:*)",
+      "Bash(git stash:*)",
+      "Bash(git clean:*)",
       "Bash(npm ci:*)",
       "Bash(npm install:*)",
       "Bash(docker compose down:*)"
