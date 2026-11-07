@@ -68,6 +68,20 @@ python3 -m venv .venv && .venv/bin/pip install ruff==0.11.8   # один раз:
 cd frontend && npm run build                          # typecheck + сборка SPA
 ```
 
+**Статус CI после push** (gh CLI нет; репозиторий публичный — API GitHub без токена):
+
+```bash
+# последние прогоны: id, коммит, статус, итог
+curl -s "https://api.github.com/repos/zvolinskiypvzozon/youtube-clone/actions/runs?per_page=3" \
+  | python3 -c "import json,sys; [print(r['id'], r['head_sha'][:7], r['status'], r['conclusion']) for r in json.load(sys.stdin)['workflow_runs']]"
+# шаги прогона (что упало): подставить id
+curl -s "https://api.github.com/repos/zvolinskiypvzozon/youtube-clone/actions/runs/<id>/jobs" \
+  | python3 -c "import json,sys; [print(j['name'], s['conclusion'], s['name']) for j in json.load(sys.stdin)['jobs'] for s in j['steps']]"
+```
+
+Ждать завершения — фоновой командой с циклом опроса раз в 20 с, а не повторными ручными
+запросами. Без токена лимит 60 запросов в час с IP.
+
 ## Definition of Done
 
 - Есть тесты на критичное поведение (доступ, роли, граничные случаи), `pytest` зелёный.
