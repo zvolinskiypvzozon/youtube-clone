@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint (ruff, tsc, shell)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install ruff==0.11.8
+      - run: ruff check backend && ruff format --check backend
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci --no-audit --no-fund
+        working-directory: frontend
+      - run: npm run build
+        working-directory: frontend
+      - name: Shell scripts syntax
+        run: bash -n deploy.sh scripts/*.sh && sh -n infra/silo/init.sh
+
+  test:
+    name: Tests + stack smoke
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate .env
+        run: bash scripts/gen-env.sh .env
+      - name: Only web publishes ports (K8)
+        run: |
+          leaked=$(docker compose --profile test config --format json \
+            | jq -r '.services | to_entries[] | select(.key != "web" and (.value.ports // [] | length) > 0) | .key')
+          if [ -n "$leaked" ]; then echo "Порты опубликованы у: $leaked"; exit 1; fi
+      - name: Build images
+        run: docker compose --profile test build
+      - name: Pytest (real Postgres + storage, isolated test DB/buckets)
+        run: docker compose --profile test run --rm tests
+      - name: Start full stack
+        run: docker compose up -d
+      - name: Wait for /api/health
+        run: |
+          for i in $(seq 1 60); do
+            curl -fsS http://127.0.0.1/api/health && exit 0
+            sleep 3
+          done
+          exit 1
+      - name: Storage is not reachable without signature
+        run: test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1/yt-media/x)" = "403"
+      - name: Logs on failure
+        if: failure()
+        run: docker compose ps -a && docker compose logs --tail=100
+      - name: Teardown
+        if: always()
+        run: docker compose --profile test down -v
