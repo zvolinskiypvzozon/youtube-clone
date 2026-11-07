@@ -53,7 +53,21 @@ install_docker() {
     > /etc/apt/sources.list.d/docker.list
   "${APT[@]}" update
   "${APT[@]}" install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin >/dev/null
-  systemctl enable --now docker
+}
+
+# Запуск демона: systemd на обычной Ubuntu; без systemd (например, WSL без [boot] systemd=true) — service.
+start_docker() {
+  if [[ -d /run/systemd/system ]]; then
+    systemctl enable --now docker
+  else
+    log "systemd не обнаружен — запускаю Docker через service"
+    service docker start
+  fi
+  for _ in $(seq 1 30); do
+    docker info >/dev/null 2>&1 && return 0
+    sleep 1
+  done
+  fail "демон Docker не запустился (journalctl -u docker или /var/log/docker.log)"
 }
 
 if ! command -v docker >/dev/null 2>&1 || ! docker compose version >/dev/null 2>&1; then
@@ -61,6 +75,7 @@ if ! command -v docker >/dev/null 2>&1 || ! docker compose version >/dev/null 2>
 else
   log "Docker уже установлен: $(docker --version)"
 fi
+docker info >/dev/null 2>&1 || start_docker
 if ! command -v openssl >/dev/null || ! command -v curl >/dev/null; then
   "${APT[@]}" update && "${APT[@]}" install -y openssl curl >/dev/null
 fi
