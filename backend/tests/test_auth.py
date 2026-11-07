@@ -9,6 +9,7 @@ from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Channel, User, UserSession
+from tests.helpers import new_user
 
 PASSWORD = "correct-horse-42"
 
@@ -146,6 +147,18 @@ async def test_banned_user_existing_session_stops_working(
     await db.execute(update(User).where(User.username == creds["username"]).values(is_banned=True))
     await db.commit()
     assert (await client.get("/api/auth/me")).status_code == 401
+
+
+async def test_banned_user_bearer_token_stops_working(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    """Политика доступа к видео считает забаненного анонимом — это держится на том, что
+    authenticate отказывает ему по любому способу входа, в том числе по Bearer."""
+    user = await new_user(client)
+    assert (await client.get("/api/auth/me", headers=user["auth"])).status_code == 200
+    await db.execute(update(User).where(User.username == user["username"]).values(is_banned=True))
+    await db.commit()
+    assert (await client.get("/api/auth/me", headers=user["auth"])).status_code == 401
 
 
 async def test_expired_session_rejected(client: AsyncClient, db: AsyncSession) -> None:
