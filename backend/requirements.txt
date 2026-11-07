@@ -6,3 +6,6 @@ sqlalchemy[asyncio]==2.0.40
 asyncpg==0.30.0
 alembic==1.15.2
 boto3==1.38.13
+argon2-cffi==25.1.0
+email-validator==2.2.0
+python-multipart==0.0.20

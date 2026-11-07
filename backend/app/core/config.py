@@ -28,6 +28,12 @@ class Settings(BaseSettings):
 
     health_timeout_seconds: float = 2.0
 
+    # Сессии (ADR 0005)
+    session_ttl_days: int = 30
+    # Secure-флаг cookie: включать при HTTPS. По ТЗ проверка идёт по HTTP на IP,
+    # поэтому по умолчанию выключен (COOKIE_SECURE=true в .env для HTTPS).
+    cookie_secure: bool = False
+
 
 @lru_cache
 def get_settings() -> Settings:
