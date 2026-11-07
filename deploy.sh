@@ -100,6 +100,15 @@ bash scripts/gen-env.sh .env
 HTTP_PORT="$(grep -E '^HTTP_PORT=' .env | cut -d= -f2 || true)"
 HTTP_PORT="${HTTP_PORT:-80}"
 
+# Без provenance/sbom-attestation: иначе на containerd image store (Docker 29) каждая сборка
+# даёт новый ID образа даже без изменений кода — контейнеры пересоздаются на каждом деплое.
+# (Ключи build.provenance/sbom в compose 2.40 не действуют — проверено.)
+export BUILDX_NO_DEFAULT_ATTESTATIONS=1
+
+PROJECT_IMAGES=(youtube-clone/api:local youtube-clone/worker:local youtube-clone/web:local)
+project_image_ids() { docker image inspect -f '{{.Id}}' "${PROJECT_IMAGES[@]}" 2>/dev/null || true; }
+OLD_IMAGE_IDS="$(project_image_ids)"
+
 log "Собираю и запускаю стек (первый запуск — несколько минут)"
 DEPLOY_STARTED="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 if ! docker compose up -d --build --remove-orphans; then
@@ -161,3 +170,10 @@ fi
 # Одноразовые контейнеры (migrate, storage-init) держат секреты в окружении
 # (видны в docker inspect) — после успешного деплоя удаляем их.
 docker compose rm -f migrate storage-init >/dev/null 2>&1 || true
+# Образы проекта от прошлой сборки, на которые больше не указывает тег, удаляем.
+# Точечно по ID (у висячих образов нет меток compose, фильтр по метке не работает);
+# чужие образы не трогаем.
+NEW_IMAGE_IDS="$(project_image_ids)"
+for old_id in $OLD_IMAGE_IDS; do
+  grep -qx "$old_id" <<<"$NEW_IMAGE_IDS" || docker image rm "$old_id" >/dev/null 2>&1 || true
+done

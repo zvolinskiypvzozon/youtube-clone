@@ -45,6 +45,7 @@
 
 ```bash
 ./deploy.sh                                          # полный деплой (Ubuntu 24.04)
+export BUILDX_NO_DEFAULT_ATTESTATIONS=1               # стабильные ID образов (иначе рестарт на каждом up)
 docker compose up -d --build                         # локальный стек
 docker compose --profile test build && docker compose --profile test run --rm tests   # pytest (БД yt_test, бакеты yt-test-*)
 python3 -m venv .venv && .venv/bin/pip install ruff==0.11.8   # один раз: ruff для хука и локальной проверки
