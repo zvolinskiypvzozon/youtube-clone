@@ -33,6 +33,10 @@ class Settings(BaseSettings):
     upload_part_bytes: int = 16 * 1024**2  # 16 МиБ: 2 ГБ = 128 частей, < лимита nginx 128 МиБ
     upload_url_ttl_seconds: int = 3600
     max_active_uploads: int = 3  # незавершённых загрузок на пользователя
+    # Ссылки на просмотр (поток, превью). Подпись проверяется на каждом Range-запросе:
+    # после истечения плеер заново запрашивает /stream (день 5). Связано с max-age ответов
+    # /yt-media/ в infra/nginx/default.conf.
+    stream_url_ttl_seconds: int = 15 * 60
 
     # Worker (ADR 0003)
     worker_poll_seconds: float = 2.0

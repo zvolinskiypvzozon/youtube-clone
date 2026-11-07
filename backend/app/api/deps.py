@@ -17,7 +17,7 @@ Bearer браузер сам не подставляет — для него п�
 from collections.abc import Awaitable, Callable
 from typing import Annotated
 
-from fastapi import Depends, Request, Response
+from fastapi import Depends, Query, Request, Response
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -98,3 +98,8 @@ def require_role(*roles: UserRole) -> Callable[..., Awaitable[User]]:
         return user
 
     return dependency
+
+
+# Параметры страниц каталога (лента, канал).
+Cursor = Annotated[str | None, Query(max_length=200, description="next_cursor предыдущей страницы")]
+Limit = Annotated[int, Query(ge=1, le=50)]

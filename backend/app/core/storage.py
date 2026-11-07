@@ -133,6 +133,19 @@ def presign_upload_parts(
     ]
 
 
+def presign_get_many(objects: list[tuple[str, str]], ttl: int) -> list[str]:
+    """Ссылки на чтение объектов (bucket, key). Только подпись, без сетевых запросов."""
+    client = _presign_client(_signing_endpoint())
+    return [
+        _for_client(
+            client.generate_presigned_url(
+                "get_object", Params={"Bucket": bucket, "Key": key}, ExpiresIn=ttl
+            )
+        )
+        for bucket, key in objects
+    ]
+
+
 def complete_multipart_upload(
     bucket: str, key: str, upload_id: str, parts: list[tuple[int, str]]
 ) -> None:

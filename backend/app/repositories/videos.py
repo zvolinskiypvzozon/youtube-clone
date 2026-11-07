@@ -1,7 +1,20 @@
 import uuid
+from dataclasses import dataclass
+from datetime import datetime
 
-from sqlalchemy import delete, exists, false, func, select
+from sqlalchemy import (
+    ColumnElement,
+    Select,
+    and_,
+    delete,
+    exists,
+    false,
+    func,
+    select,
+    tuple_,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from app.models import (
     Channel,
@@ -194,3 +207,55 @@ async def delete_originals(db: AsyncSession, video_ids: list[uuid.UUID]) -> None
                 VideoFile.video_id.in_(video_ids), VideoFile.kind == VideoFileKind.original
             )
         )
+
+
+async def files_of(db: AsyncSession, video_id: uuid.UUID) -> list[VideoFile]:
+    return list(await db.scalars(select(VideoFile).where(VideoFile.video_id == video_id)))
+
+
+@dataclass(frozen=True)
+class CatalogRow:
+    video: Video
+    channel: Channel
+    thumbnail: tuple[str, str] | None  # (bucket, key)
+
+
+def catalog_page_stmt(
+    where: ColumnElement[bool],
+    after: tuple[datetime, uuid.UUID] | None,
+    limit: int,
+    channel_id: uuid.UUID | None = None,
+) -> Select:
+    """Страница каталога, новые сверху, keyset по (published_at, id).
+
+    Условие `where` — из policies (listed_filter): индекс ix_videos_feed (лента) или
+    ix_videos_channel_published (канал) читается в порядке выдачи и останавливается на limit.
+    """
+    thumb = aliased(VideoFile)
+    stmt = (
+        select(Video, Channel, thumb.bucket, thumb.s3_key)
+        .join(Channel, Channel.id == Video.channel_id)
+        .outerjoin(thumb, and_(thumb.video_id == Video.id, thumb.kind == VideoFileKind.thumbnail))
+        .where(where, Video.published_at.is_not(None))
+        .order_by(Video.published_at.desc(), Video.id.desc())
+        .limit(limit)
+    )
+    if channel_id is not None:
+        stmt = stmt.where(Video.channel_id == channel_id)
+    if after is not None:
+        stmt = stmt.where(tuple_(Video.published_at, Video.id) < tuple_(*after))
+    return stmt
+
+
+async def catalog_page(
+    db: AsyncSession,
+    where: ColumnElement[bool],
+    after: tuple[datetime, uuid.UUID] | None,
+    limit: int,
+    channel_id: uuid.UUID | None = None,
+) -> list[CatalogRow]:
+    rows = (await db.execute(catalog_page_stmt(where, after, limit, channel_id))).all()
+    return [
+        CatalogRow(video, channel, (bucket, key) if key else None)
+        for video, channel, bucket, key in rows
+    ]

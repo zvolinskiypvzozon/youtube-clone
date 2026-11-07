@@ -1,0 +1,196 @@
+"""Просмотр видео: карточка, ссылки на поток, каталог (лента, канал).
+
+Доступ — только через policies (ADR 0006): одно видео — `get_viewable` (can_view, иначе 404),
+списки каталога — `listed_filter`. Ссылки на файлы — presigned GET с коротким TTL, выдаются
+только после проверки прав (ADR 0004).
+"""
+
+import asyncio
+import uuid
+from dataclasses import dataclass
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core import storage
+from app.core.config import get_settings
+from app.core.errors import Conflict, NotFound
+from app.models import Channel, User, Video, VideoFileKind, VideoStatus
+from app.repositories import channels as channels_repo
+from app.repositories import videos as videos_repo
+from app.schemas.videos import (
+    ChannelBrief,
+    ChannelOut,
+    VideoCardOut,
+    VideoListItem,
+    VideoPage,
+    VideoSourceOut,
+    VideoStateOut,
+    VideoStreamOut,
+)
+from app.services import cursor, policies
+
+# Один текст для «нет такого» и «нет прав»: ответ не раскрывает существование видео.
+VIDEO_NOT_FOUND = "Видео не найдено"
+CHANNEL_NOT_FOUND = "Канал не найден"
+NOT_READY = "Видео ещё не обработано"
+
+# Качества потока, лучшее первым.
+QUALITIES = {VideoFileKind.mp4_720: "720p", VideoFileKind.mp4_360: "360p"}
+
+
+@dataclass(frozen=True)
+class Viewable:
+    video: Video
+    channel: Channel
+
+
+async def get_viewable(db: AsyncSession, viewer: User | None, video_id: uuid.UUID) -> Viewable:
+    """Единственная точка входа к одному видео для зрителя: нет видео или нет прав → 404."""
+    loaded = await videos_repo.get_for_view(db, video_id, viewer.id if viewer else None)
+    if loaded is None:
+        raise NotFound(VIDEO_NOT_FOUND)
+    video, channel, has_access = loaded
+    facts = policies.VideoFacts.of(video, owner_id=channel.owner_id, viewer_has_access=has_access)
+    if not policies.can_view(viewer, facts):
+        raise NotFound(VIDEO_NOT_FOUND)
+    return Viewable(video, channel)
+
+
+async def _sign(objects: list[tuple[str, str]]) -> list[str]:
+    if not objects:
+        return []
+    ttl = get_settings().stream_url_ttl_seconds
+    return await asyncio.to_thread(storage.presign_get_many, objects, ttl)
+
+
+def _brief(channel: Channel) -> ChannelBrief:
+    return ChannelBrief(id=channel.id, handle=channel.handle, title=channel.title)
+
+
+async def card(db: AsyncSession, viewer: User | None, video_id: uuid.UUID) -> VideoCardOut:
+    v = await get_viewable(db, viewer, video_id)
+    video = v.video
+    thumbs = [
+        (f.bucket, f.s3_key)
+        for f in await videos_repo.files_of(db, video.id)
+        if f.kind == VideoFileKind.thumbnail
+    ]
+    thumbnail_url = (await _sign(thumbs) or [None])[0]
+    state = None
+    if policies.sees_internal_state(viewer, v.channel.owner_id):
+        state = VideoStateOut(
+            status=video.status,
+            visibility=video.visibility,
+            moderation=video.moderation,
+            moderation_reason=video.moderation_reason,
+            failure_reason=video.failure_reason,
+        )
+    return VideoCardOut(
+        id=video.id,
+        title=video.title,
+        description=video.description,
+        channel=_brief(v.channel),
+        duration_seconds=video.duration_seconds,
+        views_count=video.views_count,
+        likes_count=video.likes_count,
+        dislikes_count=video.dislikes_count,
+        comments_count=video.comments_count,
+        published_at=video.published_at,
+        thumbnail_url=thumbnail_url,
+        state=state,
+    )
+
+
+async def stream(db: AsyncSession, viewer: User | None, video_id: uuid.UUID) -> VideoStreamOut:
+    v = await get_viewable(db, viewer, video_id)
+    # Не готовое видео проходит политику только для владельца и staff — им понятная ошибка.
+    if v.video.status != VideoStatus.ready:
+        raise Conflict(NOT_READY)
+    files = {f.kind: f for f in await videos_repo.files_of(db, v.video.id)}
+    variants = [files[kind] for kind in QUALITIES if kind in files]
+    if not variants:  # ready без транскодов — нарушение данных; не отдаём пустой плеер
+        raise Conflict(NOT_READY)
+    thumb = files.get(VideoFileKind.thumbnail)
+    objects = [(f.bucket, f.s3_key) for f in variants]
+    if thumb is not None:
+        objects.append((thumb.bucket, thumb.s3_key))
+    urls = await _sign(objects)
+    return VideoStreamOut(
+        video_id=v.video.id,
+        sources=[
+            VideoSourceOut(
+                quality=QUALITIES[f.kind],
+                height=f.height,
+                mime=f.mime,
+                size_bytes=f.size_bytes,
+                url=url,
+            )
+            for f, url in zip(variants, urls[: len(variants)], strict=True)
+        ],
+        thumbnail_url=urls[len(variants)] if thumb is not None else None,
+        expires_in=get_settings().stream_url_ttl_seconds,
+    )
+
+
+async def _catalog(
+    db: AsyncSession,
+    after_cursor: str | None,
+    limit: int,
+    channel_id: uuid.UUID | None = None,
+) -> VideoPage:
+    after = cursor.decode(after_cursor) if after_cursor else None
+    rows = await videos_repo.catalog_page(
+        db, policies.listed_filter(), after, limit + 1, channel_id=channel_id
+    )
+    has_more = len(rows) > limit
+    rows = rows[:limit]
+    thumbs = [r.thumbnail for r in rows if r.thumbnail is not None]
+    signed = iter(await _sign(thumbs))
+    items = [
+        VideoListItem(
+            id=r.video.id,
+            title=r.video.title,
+            channel=_brief(r.channel),
+            duration_seconds=r.video.duration_seconds,
+            views_count=r.video.views_count,
+            published_at=r.video.published_at,
+            thumbnail_url=next(signed) if r.thumbnail is not None else None,
+        )
+        for r in rows
+    ]
+    last = rows[-1].video if rows else None
+    next_cursor = (
+        cursor.encode(last.published_at, last.id)
+        if has_more and last is not None and last.published_at is not None
+        else None
+    )
+    return VideoPage(items=items, next_cursor=next_cursor)
+
+
+async def feed(db: AsyncSession, after_cursor: str | None, limit: int) -> VideoPage:
+    """Лента главной: каталог (listed_filter) одинаков для всех зрителей."""
+    return await _catalog(db, after_cursor, limit)
+
+
+async def get_channel(db: AsyncSession, handle: str) -> ChannelOut:
+    channel = await channels_repo.get_by_handle(db, handle)
+    if channel is None:
+        raise NotFound(CHANNEL_NOT_FOUND)
+    return ChannelOut(
+        id=channel.id,
+        handle=channel.handle,
+        title=channel.title,
+        description=channel.description,
+        subscribers_count=channel.subscribers_count,
+        created_at=channel.created_at,
+    )
+
+
+async def channel_videos(
+    db: AsyncSession, handle: str, after_cursor: str | None, limit: int
+) -> VideoPage:
+    """Видео канала: тот же каталог — владелец свои приватные видит в «Моих видео»."""
+    channel = await channels_repo.get_by_handle(db, handle)
+    if channel is None:
+        raise NotFound(CHANNEL_NOT_FOUND)
+    return await _catalog(db, after_cursor, limit, channel_id=channel.id)

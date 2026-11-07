@@ -77,6 +77,12 @@ def can_view(viewer: User | None, facts: VideoFacts) -> bool:
     return viewer is not None and facts.viewer_has_access
 
 
+def sees_internal_state(viewer: User | None, owner_id: uuid.UUID) -> bool:
+    """Статус обработки, видимость, пометка модерации и причина отказа: владельцу и staff.
+    Остальные получают только публичную карточку."""
+    return viewer is not None and (viewer.id == owner_id or is_staff(viewer))
+
+
 def can_manage(viewer: User | None, owner_id: uuid.UUID) -> bool:
     """Правка метаданных и видимости, список допуска, удаление. Модерация (день 6) —
     отдельные права, не через эту функцию."""
