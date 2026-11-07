@@ -399,3 +399,9 @@ async def test_unknown_route_error_in_russian(client: AsyncClient) -> None:
     r = await client.get("/api/does-not-exist")
     assert r.status_code == 404
     assert r.json() == {"detail": "Не найдено"}
+
+
+@pytest.mark.parametrize("name", ["admin", "Admin", "ROOT", "moderator", "support"])
+async def test_reserved_usernames_cannot_register(client: AsyncClient, name: str) -> None:
+    r = await client.post("/api/auth/register", json=_creds(username=name))
+    assert r.status_code == 422

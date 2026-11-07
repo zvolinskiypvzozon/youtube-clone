@@ -9,6 +9,7 @@ from app.api.deps import (
     CurrentUser,
     DbSession,
     OptionalUser,
+    no_store,
     oauth2_scheme,
     session_token,
 )
@@ -18,13 +19,7 @@ from app.schemas.auth import LoginIn, MeOut, RegisterIn, TokenOut
 from app.schemas.common import err
 from app.services import auth as auth_service
 
-
-def _no_store(response: Response) -> None:
-    # Ответы с токенами и персональными данными не кэшируются (RFC 6749 §5.1).
-    response.headers["Cache-Control"] = "no-store"
-
-
-router = APIRouter(prefix="/auth", tags=["auth"], dependencies=[Depends(_no_store)])
+router = APIRouter(prefix="/auth", tags=["auth"], dependencies=[Depends(no_store)])
 
 
 def _client(request: Request) -> auth_service.ClientInfo:

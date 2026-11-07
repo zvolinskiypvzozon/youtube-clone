@@ -2,13 +2,27 @@ import uuid
 from datetime import datetime
 from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, StringConstraints
+from pydantic import AfterValidator, BaseModel, ConfigDict, EmailStr, Field, StringConstraints
 
 from app.models import UserRole
+
+# Служебные имена нельзя занять при регистрации: иначе пользователь мог бы выдавать себя
+# за администрацию или занять имя администратора до его создания при деплое.
+RESERVED_USERNAMES = frozenset(
+    {"admin", "administrator", "root", "moderator", "support", "system", "staff", "official"}
+)
+
+
+def _not_reserved(value: str) -> str:
+    if value.lower() in RESERVED_USERNAMES:
+        raise ValueError("это имя зарезервировано")
+    return value
+
 
 Username = Annotated[
     str,
     StringConstraints(strip_whitespace=True, pattern=r"^[A-Za-z0-9_]{3,30}$"),
+    AfterValidator(_not_reserved),
     Field(description="3–30 символов: латиница, цифры, _", examples=["alice_42"]),
 ]
 Password = Annotated[

@@ -14,9 +14,10 @@ Bearer браузер сам не подставляет — для него п�
 поэтому сервис получает сессию БД в чистом состоянии.
 """
 
+from collections.abc import Awaitable, Callable
 from typing import Annotated
 
-from fastapi import Depends, Request
+from fastapi import Depends, Request, Response
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -24,7 +25,7 @@ from app.core import security
 from app.core.config import get_settings
 from app.core.db import get_session
 from app.core.errors import Forbidden, Unauthorized
-from app.models import User
+from app.models import User, UserRole
 from app.services import auth as auth_service
 
 SESSION_COOKIE = "session"
@@ -75,5 +76,25 @@ async def get_current_user(
     return user
 
 
+def no_store(response: Response) -> None:
+    """Ответы с токенами и персональными данными не кэшируются (RFC 6749 §5.1)."""
+    response.headers["Cache-Control"] = "no-store"
+
+
 OptionalUser = Annotated[User | None, Depends(get_optional_user)]
 CurrentUser = Annotated[User, Depends(get_current_user)]
+
+
+def require_role(*roles: UserRole) -> Callable[..., Awaitable[User]]:
+    """Зависимость: пользователь вошёл и имеет одну из ролей. Иначе 401 / 403.
+
+    Пример: `dependencies=[Depends(require_role(UserRole.admin))]`.
+    """
+    allowed = frozenset(roles)
+
+    async def dependency(user: CurrentUser) -> User:
+        if user.role not in allowed:
+            raise Forbidden("Недостаточно прав")
+        return user
+
+    return dependency

@@ -1,10 +1,10 @@
 import uuid
 
-from sqlalchemy import exists, select
+from sqlalchemy import exists, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.models import Channel, User
+from app.models import Channel, User, UserRole
 
 
 async def get_by_login(db: AsyncSession, login: str) -> User | None:
@@ -43,3 +43,33 @@ async def create_with_channel(
     db.add(Channel(owner_id=user.id, handle=username, title=username))
     await db.flush()
     return user
+
+
+async def get(db: AsyncSession, user_id: uuid.UUID) -> User | None:
+    return await db.get(User, user_id)
+
+
+async def list_page(db: AsyncSession, *, limit: int, offset: int) -> tuple[list[User], int]:
+    total = await db.scalar(select(func.count()).select_from(User)) or 0
+    stmt = select(User).order_by(User.created_at.desc(), User.id.desc()).limit(limit).offset(offset)
+    return list((await db.execute(stmt)).scalars()), total
+
+
+# Ключ транзакционной advisory-блокировки для смены ролей (произвольная константа).
+ROLE_CHANGE_LOCK_ID = 7_100_001
+
+
+async def lock_role_changes(db: AsyncSession) -> None:
+    """Сериализует смены ролей; блокировка снимается при commit/rollback транзакции."""
+    await db.execute(select(func.pg_advisory_xact_lock(ROLE_CHANGE_LOCK_ID)))
+
+
+async def get_role(db: AsyncSession, user_id: uuid.UUID) -> UserRole | None:
+    return await db.scalar(select(User.role).where(User.id == user_id))
+
+
+async def count_admins(db: AsyncSession) -> int:
+    return (
+        await db.scalar(select(func.count()).select_from(User).where(User.role == UserRole.admin))
+        or 0
+    )
