@@ -1,0 +1,147 @@
+name: youtube-clone
+
+# Общие переменные бэкенда (api, worker). Приложение ходит в БД под ролью без
+# суперпользовательских прав (см. backend/app/db_bootstrap.py).
+x-backend-env: &backend-env
+  ENV: ${APP_ENV:-prod}
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  DATABASE_URL: postgresql+asyncpg://${APP_DB_USER:-yt_app}:${APP_DB_PASSWORD:?}@postgres:5432/${POSTGRES_DB:?}
+  SECRET_KEY: ${SECRET_KEY:?}
+  S3_ENDPOINT: http://storage:9000
+  S3_ACCESS_KEY: ${S3_ACCESS_KEY:?}
+  S3_SECRET_KEY: ${S3_SECRET_KEY:?}
+  S3_BUCKET_RAW: yt-raw
+  S3_BUCKET_MEDIA: yt-media
+
+x-owner-db-url: &owner-db-url postgresql+asyncpg://${POSTGRES_USER:?}:${POSTGRES_PASSWORD:?}@postgres:5432/${POSTGRES_DB:?}
+
+x-backend-build: &backend-build
+  context: ./backend
+
+services:
+  postgres:
+    image: postgres:17.10-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+      POSTGRES_DB: ${POSTGRES_DB:?}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # По TCP, а не через сокет: во время initdb временный сервер слушает только сокет,
+      # и проверка через сокет давала ложный healthy до финального рестарта.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  # Объектное хранилище: pgsty/silo — поддерживаемый форк MinIO (docs/adr/0002).
+  storage:
+    image: pgsty/silo:RELEASE.2026-10-18T00-00-00Z
+    restart: unless-stopped
+    command: ["silo", "server", "/data"]
+    environment:
+      MINIO_ROOT_USER: ${STORAGE_ROOT_USER:?}
+      MINIO_ROOT_PASSWORD: ${STORAGE_ROOT_PASSWORD:?}
+      MINIO_BROWSER: "off"
+    volumes:
+      - storagedata:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9000/minio/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  storage-init:
+    image: pgsty/silo:RELEASE.2026-10-18T00-00-00Z
+    restart: "no"
+    entrypoint: ["sh", "/init.sh"]
+    environment:
+      STORAGE_ROOT_USER: ${STORAGE_ROOT_USER:?}
+      STORAGE_ROOT_PASSWORD: ${STORAGE_ROOT_PASSWORD:?}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:?}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:?}
+      # yt-test-* — изолированные бакеты для автотестов.
+      S3_BUCKETS: yt-raw yt-media yt-test-raw yt-test-media
+    volumes:
+      - ./infra/silo/init.sh:/init.sh:ro
+    depends_on:
+      storage:
+        condition: service_healthy
+
+  # Роль приложения в БД + миграции. Под владельцем схемы.
+  # Тот же образ, что у api (собирается сервисом api).
+  migrate:
+    image: youtube-clone/api:local
+    pull_policy: never
+    restart: "no"
+    command: ["sh", "-c", "python -m app.db_bootstrap && alembic upgrade head"]
+    environment:
+      DATABASE_URL: *owner-db-url
+      APP_DB_USER: ${APP_DB_USER:-yt_app}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:?}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    build: { <<: *backend-build, target: api }
+    image: youtube-clone/api:local
+    restart: unless-stopped
+    environment: *backend-env
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      storage-init:
+        condition: service_completed_successfully
+
+  worker:
+    build: { <<: *backend-build, target: worker }
+    image: youtube-clone/worker:local
+    restart: unless-stopped
+    environment: *backend-env
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      storage-init:
+        condition: service_completed_successfully
+
+  web:
+    build:
+      context: .
+      dockerfile: infra/nginx/Dockerfile
+    image: youtube-clone/web:local
+    restart: unless-stopped
+    ports:
+      - "${HTTP_PORT:-80}:8080"
+    depends_on:
+      api:
+        condition: service_healthy
+      storage:
+        condition: service_healthy
+
+  # Автотесты: `docker compose --profile test build && docker compose --profile test run --rm tests`
+  # Работают с отдельной БД <db>_test и бакетами yt-test-* — боевые данные не затрагиваются.
+  tests:
+    profiles: ["test"]
+    build: { <<: *backend-build, target: dev }
+    image: youtube-clone/tests:local
+    environment:
+      <<: *backend-env
+      ENV: test
+      DATABASE_URL: postgresql+asyncpg://${APP_DB_USER:-yt_app}:${APP_DB_PASSWORD:?}@postgres:5432/${POSTGRES_DB:?}_test
+      OWNER_DATABASE_URL: *owner-db-url
+      APP_DB_USER: ${APP_DB_USER:-yt_app}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:?}
+      S3_BUCKET_RAW: yt-test-raw
+      S3_BUCKET_MEDIA: yt-test-media
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      storage-init:
+        condition: service_completed_successfully
+
+volumes:
+  pgdata:
+  storagedata:

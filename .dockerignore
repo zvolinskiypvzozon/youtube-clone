@@ -1,0 +1,12 @@
+# Контекст сборки web-образа (infra/nginx/Dockerfile) — корень репозитория.
+.git
+**/.env
+**/.env.*
+**/node_modules
+**/dist
+backend
+docs
+.claude
+.github
+.venv
+*.jsonl
