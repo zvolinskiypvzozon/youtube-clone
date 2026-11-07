@@ -145,6 +145,9 @@ cat <<EOF
   Swagger:     http://${IP:-localhost}${PORT_SUFFIX}/docs
   Health:      http://${IP:-localhost}${PORT_SUFFIX}/api/health
 
+  Сквозная проверка (регистрация → загрузка → обработка):
+    sudo python3 scripts/smoke.py http://localhost${PORT_SUFFIX}
+
 EOF
 
 # Администратор. Пароль показываем, только если bootstrap создал администратора именно в этом
