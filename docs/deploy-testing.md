@@ -124,7 +124,9 @@ time sudo ./deploy.sh
   `http://localhost/api/health` → `{"status":"ok","database":"ok","storage":"ok"}`.
   Адрес из вывода скрипта (`hostname -I`) — внутренний адрес WSL. С Windows используйте `localhost`.
 - Повторный `sudo ./deploy.sh` проходит без ошибок, данные сохраняются.
-- Сценарий `scripts/smoke.sh http://localhost` проходит целиком (появится вместе с загрузкой видео).
+- `sudo python3 scripts/smoke.py` проходит целиком: регистрация → загрузка видео (части напрямую
+  в хранилище через nginx) → обработка worker-ом до `ready` → 360p, 720p, превью → хранилище без
+  подписи 403. Тестовое видео генерирует ffmpeg из контейнера worker. Тот же скрипт запускает CI.
 
 ### Что прислать при ошибке
 

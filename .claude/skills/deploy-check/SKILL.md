@@ -49,7 +49,7 @@ time sudo ./deploy.sh
 - `deploy.sh` завершился с кодом 0.
 - С Windows открываются `http://localhost/`, `/docs`; `/api/health` → `{"status":"ok",...}`.
 - Повторный `sudo ./deploy.sh` проходит без ошибок, данные сохраняются.
-- `scripts/smoke.sh http://localhost` проходит сценарий целиком (когда скрипт появится).
+- `sudo python3 scripts/smoke.py` проходит целиком (регистрация → загрузка → ready).
 
 ## 5. Разбор результата
 

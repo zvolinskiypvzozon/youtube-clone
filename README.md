@@ -37,6 +37,12 @@ sudo ./deploy.sh
   `PATCH /api/admin/users/{id}` (в Swagger — раздел *admin*).
 - В Swagger войти можно кнопкой **Authorize** (логин или email и пароль).
 
+Сквозная проверка развёрнутого стека (регистрация → загрузка видео → обработка до `ready`):
+
+```bash
+sudo python3 scripts/smoke.py            # или с адресом: … scripts/smoke.py http://<IP>
+```
+
 Как проверять деплой на чистой системе (WSL-дистрибутив со сбросом из снимка или ВМ):
 [docs/deploy-testing.md](docs/deploy-testing.md).
 
