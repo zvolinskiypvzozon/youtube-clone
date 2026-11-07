@@ -1,15 +1,33 @@
-from sqlalchemy import MetaData
-from sqlalchemy.orm import DeclarativeBase
+"""Все модели импортируются здесь, чтобы Alembic видел полную метадату."""
 
-# Явные имена ограничений — стабильные миграции Alembic.
-NAMING_CONVENTION = {
-    "ix": "ix_%(column_0_label)s",
-    "uq": "uq_%(table_name)s_%(column_0_name)s",
-    "ck": "ck_%(table_name)s_%(constraint_name)s",
-    "fk": "fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s",
-    "pk": "pk_%(table_name)s",
-}
+from app.models.base import Base
+from app.models.enums import (
+    JobStatus,
+    JobType,
+    ModerationState,
+    UserRole,
+    VideoFileKind,
+    VideoStatus,
+    VideoVisibility,
+)
+from app.models.job import Job
+from app.models.user import Channel, User, UserSession
+from app.models.video import Video, VideoAccess, VideoFile
 
-
-class Base(DeclarativeBase):
-    metadata = MetaData(naming_convention=NAMING_CONVENTION)
+__all__ = [
+    "Base",
+    "Channel",
+    "Job",
+    "JobStatus",
+    "JobType",
+    "ModerationState",
+    "User",
+    "UserRole",
+    "UserSession",
+    "Video",
+    "VideoAccess",
+    "VideoFile",
+    "VideoFileKind",
+    "VideoStatus",
+    "VideoVisibility",
+]
