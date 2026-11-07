@@ -104,17 +104,25 @@ services:
     image: youtube-clone/api:local
     restart: unless-stopped
     environment: *backend-env
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
     depends_on:
       migrate:
         condition: service_completed_successfully
       storage-init:
         condition: service_completed_successfully
 
+  # ffmpeg обрабатывает недоверенные файлы: ограничения на случай уязвимости декодера
+  # или «бомбы» (память/процессы); привилегии сброшены. CPU не ограничен (ADR 0003).
   worker:
     build: { <<: *backend-build, target: worker }
     image: youtube-clone/worker:local
     restart: unless-stopped
     environment: *backend-env
+    mem_limit: 2g
+    pids_limit: 256
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -127,6 +135,8 @@ services:
       dockerfile: infra/nginx/Dockerfile
     image: youtube-clone/web:local
     restart: unless-stopped
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
     ports:
       - "${HTTP_PORT:-80}:8080"
     depends_on:
