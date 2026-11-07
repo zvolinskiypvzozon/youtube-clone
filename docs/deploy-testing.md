@@ -19,10 +19,15 @@ wsl --install -d Ubuntu-24.04 --name yt-clean
 # Внутри: создать пользователя по запросу установщика, больше ничего не ставить.
 # Проверить, что systemd включён (на свежих образах Ubuntu — по умолчанию):
 #   cat /etc/wsl.conf   ->  [boot] systemd=true
+# Зафиксировать DNS — см. раздел «DNS в WSL» ниже (обязательно до экспорта снимка).
 
 wsl --terminate yt-clean
 wsl --export yt-clean $HOME\wsl\yt-clean.tar      # эталонное «чистое» состояние
 ```
+
+Снимок — это Ubuntu «из коробки» плюс одна настройка среды: статический DNS.
+Она нужна только тестовой среде WSL, на обычном сервере она не требуется. Сам проект
+в снимке ничего не настраивает.
 
 ### Сброс к чистому состоянию (перед каждой проверкой)
 
@@ -48,6 +53,47 @@ wsl --import yt-clean $HOME\wsl\yt-clean $HOME\wsl\yt-clean.tar
    sudo systemctl stop docker docker.socket
    ```
    После проверки: `sudo systemctl start docker`.
+
+### DNS в WSL
+
+**Симптом.** Первый прогон в `yt-clean` упал на скачивании:
+`Could not resolve host: github.com`, `Could not resolve host: archive.ubuntu.com`.
+Ошибка плавающая: часть запросов проходила, часть нет.
+
+**Причина.** По умолчанию WSL сам генерирует `/etc/resolv.conf` (`generateResolvConf=true`) и
+отправляет DNS-запросы через резолвер Windows. Этот путь бывает нестабилен: при смене сети,
+VPN или после сна хоста. Проект тут ни при чём, но деплою нужен интернет: apt, Docker Hub,
+PyPI, npm.
+
+**Решение.** Отключить генерацию и прописать публичные DNS-серверы. Выполняется внутри
+`yt-clean` **до** экспорта снимка, чтобы настройка была в эталонном состоянии:
+
+```bash
+# 1. Отключить автогенерацию resolv.conf (добавить секцию, остальные секции сохранить)
+sudo tee -a /etc/wsl.conf >/dev/null <<'EOF'
+
+[network]
+generateResolvConf=false
+EOF
+```
+```powershell
+wsl --terminate yt-clean      # перезапуск, чтобы wsl.conf применился
+wsl -d yt-clean
+```
+```bash
+# 2. resolv.conf был симлинком на сгенерированный файл — заменить обычным файлом
+sudo rm -f /etc/resolv.conf
+printf 'nameserver 8.8.8.8\nnameserver 1.1.1.1\n' | sudo tee /etc/resolv.conf
+getent hosts github.com archive.ubuntu.com registry-1.docker.io   # должны разрешаться
+```
+Затем `wsl --terminate yt-clean` и заново `wsl --export yt-clean $HOME\wsl\yt-clean.tar`.
+
+**Защита в `deploy.sh`.** Перед любыми установками скрипт запускает `scripts/check-network.sh`.
+Скрипт проверяет DNS (с тремя попытками) для всех нужных хостов: зеркала apt из источников системы,
+`download.docker.com`, Docker Hub, `deb.debian.org`, PyPI, npm. Затем проверяет, что проходит HTTPS.
+При проблеме деплой сразу останавливается с понятным сообщением и списком хостов, а не падает
+через несколько минут на apt или `docker pull`. Пропустить проверку можно флагом
+`--skip-network-check` (например, при локальном зеркале).
 
 ### Запуск
 
@@ -84,6 +130,14 @@ time sudo ./deploy.sh
 | Сеть | общая с другими дистрибутивами, доступ с Windows по `localhost` | собственный IP |
 | systemd | включается через `/etc/wsl.conf`; без него `deploy.sh` запускает Docker через `service` | есть всегда |
 | unattended-upgrades сразу после загрузки | обычно не работает | работает; `deploy.sh` ждёт блокировку dpkg до 10 минут |
+| DNS | генерируется WSL и бывает нестабилен — в снимке зафиксирован статически | обычный системный резолвер |
+
+### Журнал прогонов
+
+| Дата | Коммит | Результат |
+|---|---|---|
+| 2026-11-07 | `3beb185` | Прогон 1 упал на DNS (`Could not resolve host`), причина в среде. Настроен статический DNS, снимок пересоздан |
+| 2026-11-07 | `3beb185` | Прогон 2 успешен за 11:47 (первый запуск, с установкой Docker). Все контейнеры healthy; `/`, `/docs`, `/api/health` открываются с Windows |
 
 Проверка в WSL покрывает основное: установку Docker, сборку, запуск, миграции, хранилище, nginx.
 Сетевую часть настоящего сервера (доступ по IP из локальной сети) она не покрывает. Перед сдачей
