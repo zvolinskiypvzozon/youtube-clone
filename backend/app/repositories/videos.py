@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, exists, false, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
@@ -8,6 +8,7 @@ from app.models import (
     Job,
     JobType,
     Video,
+    VideoAccess,
     VideoFile,
     VideoFileKind,
     VideoStatus,
@@ -56,6 +57,24 @@ async def create_uploading(
     db.add(video)
     await db.flush()
     return video
+
+
+async def get_for_view(
+    db: AsyncSession, video_id: uuid.UUID, viewer_id: uuid.UUID | None
+) -> tuple[Video, Channel, bool] | None:
+    """Видео, его канал и «зритель в списке допуска» — одним запросом, для политики."""
+    has_access = (
+        exists().where(VideoAccess.video_id == Video.id, VideoAccess.user_id == viewer_id)
+        if viewer_id is not None
+        else false()
+    )
+    stmt = (
+        select(Video, Channel, has_access.label("has_access"))
+        .join(Channel, Channel.id == Video.channel_id)
+        .where(Video.id == video_id)
+    )
+    row = (await db.execute(stmt)).one_or_none()
+    return (row[0], row[1], bool(row[2])) if row else None
 
 
 async def get_owned_for_update(
