@@ -1,9 +1,10 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.models import ModerationState, VideoStatus, VideoVisibility
+from app.schemas.uploads import Title
 
 
 class ChannelBrief(BaseModel):
@@ -78,3 +79,22 @@ class ChannelOut(BaseModel):
     description: str
     subscribers_count: int
     created_at: datetime
+
+
+class VideoUpdateIn(BaseModel):
+    """Правка владельцем: передаются только меняемые поля, хотя бы одно. null — не значение."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: Title | None = Field(default=None, examples=["Новое название"])
+    description: str | None = Field(default=None, max_length=5000)
+    visibility: VideoVisibility | None = None
+
+    @model_validator(mode="after")
+    def _non_empty(self) -> "VideoUpdateIn":
+        if not self.model_fields_set:
+            raise ValueError("Нужно передать хотя бы одно поле")
+        nulls = sorted(f for f in self.model_fields_set if getattr(self, f) is None)
+        if nulls:
+            raise ValueError(f"Поля не могут быть null: {', '.join(nulls)}")
+        return self

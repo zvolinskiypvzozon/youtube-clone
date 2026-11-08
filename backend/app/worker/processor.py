@@ -16,7 +16,6 @@ import contextlib
 import logging
 import tempfile
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
@@ -25,10 +24,11 @@ from botocore.exceptions import ClientError
 from app.core import storage
 from app.core.config import get_settings
 from app.core.db import get_sessionmaker
-from app.models import VideoFileKind, VideoStatus, VideoVisibility
+from app.models import VideoFileKind, VideoStatus
 from app.repositories import jobs as jobs_repo
 from app.repositories import videos as videos_repo
 from app.repositories.jobs import Claimed
+from app.services.publication import publish_if_due
 from app.worker import media
 
 log = logging.getLogger("worker.processor")
@@ -172,8 +172,7 @@ async def _finalize(
         video.status = VideoStatus.ready
         video.failure_reason = None
         video.duration_seconds = round(probe.duration)
-        if video.visibility != VideoVisibility.private and video.published_at is None:
-            video.published_at = datetime.now(UTC)
+        publish_if_due(video)
         commit_started.append(True)
         await db.commit()
         return raw_key

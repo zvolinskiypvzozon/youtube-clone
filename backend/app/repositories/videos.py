@@ -156,6 +156,23 @@ async def delete_original(db: AsyncSession, video_id: uuid.UUID) -> None:
     )
 
 
+async def lock_for_edit(db: AsyncSession, video_id: uuid.UUID) -> Video | None:
+    """Строка видео под правку владельцем: FOR NO KEY UPDATE до конца транзакции.
+
+    Сериализуется с финализацией worker-а (lock_video), но не мешает вставкам в дочерние
+    таблицы (video_files, video_access, jobs): их FOR KEY SHARE с ней совместим. Вызывать
+    только после проверки прав — иначе строку чужого видео сможет блокировать кто угодно.
+    populate_existing: строка уже прочитана в эту сессию при проверке прав и обязана
+    перечитаться после блокировки, иначе правка работала бы по устаревшему статусу."""
+    stmt = (
+        select(Video)
+        .where(Video.id == video_id)
+        .with_for_update(key_share=True)
+        .execution_options(populate_existing=True)
+    )
+    return await db.scalar(stmt)
+
+
 async def lock_video(db: AsyncSession, video_id: uuid.UUID) -> Video | None:
     return await db.scalar(select(Video).where(Video.id == video_id).with_for_update())
 
