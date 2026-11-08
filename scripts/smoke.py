@@ -10,7 +10,8 @@
 Только стандартная библиотека Python 3. Код выхода 0 — всё прошло.
 
 Сценарий из ТЗ «регистрация → загрузка → просмотр → лайк и комментарий» скрипт расширит,
-когда появятся соответствующие API (дни 4–5). До появления GET /api/videos/{id} статус
+когда появятся соответствующие API (дни 4–5): лента и поток (Range 206, неверная подпись 403)
+уже проверяются. До появления GET /api/videos/{id} статус
 обработки читается из БД через `docker compose exec postgres` (TEMPORARY).
 """
 
@@ -177,6 +178,42 @@ def check_files(video_id: str) -> None:
         raise AssertionError(f"файлы: {kinds}")
 
 
+def header(headers: dict, name: str) -> str | None:
+    """Заголовки без учёта регистра (HTTP/1.1 nginx отдаёт как угодно)."""
+    return next((v for k, v in headers.items() if k.lower() == name.lower()), None)
+
+
+@step("Лента и поток: видео в GET /api/videos, Range 206, подпись проверяется")
+def check_playback(video_id: str) -> None:
+    status, _, body = http("GET", "/api/videos")
+    expect(status, 200, body)
+    if video_id not in {item["id"] for item in json.loads(body)["items"]}:
+        raise AssertionError("видео нет в ленте")
+
+    status, _, body = http("GET", f"/api/videos/{video_id}/stream")  # без входа: видео публичное
+    expect(status, 200, body)
+    sources = json.loads(body)["sources"]
+    if [s["quality"] for s in sources] != ["720p", "360p"]:
+        raise AssertionError(f"качества: {[s['quality'] for s in sources]}")
+    url = sources[0]["url"]
+    if not url.startswith("/yt-media/"):
+        raise AssertionError(f"ссылка не относительная: {url[:80]}")
+
+    status, headers, body = http("GET", url, headers={"Range": "bytes=0-99"})
+    expect(status, 206, body)
+    if len(body) != 100 or not (header(headers, "Content-Range") or "").startswith("bytes 0-99/"):
+        raise AssertionError(f"Range: {len(body)} байт, {header(headers, 'Content-Range')}")
+    if header(headers, "Cache-Control") != "private, max-age=900":
+        raise AssertionError(f"Cache-Control: {header(headers, 'Cache-Control')}")
+
+    sig = urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)["X-Amz-Signature"][0]
+    forged = url.replace(sig, ("0" if sig[0] != "0" else "1") + sig[1:])
+    status, headers, body = http("GET", forged, headers={"Range": "bytes=0-99"})
+    expect(status, 403, body)
+    if header(headers, "Cache-Control") is not None:
+        raise AssertionError(f"Cache-Control у 403: {header(headers, 'Cache-Control')}")
+
+
 @step("Хранилище закрыто: без подписи 403")
 def check_storage_closed(video_id: str) -> None:
     for path in (f"/yt-raw/raw/{video_id}/source", f"/yt-media/videos/{video_id}/"):
@@ -194,6 +231,7 @@ def main() -> int:
         video_id = upload(auth, video)
         wait_ready(video_id)
         check_files(video_id)
+        check_playback(video_id)
         check_storage_closed(video_id)
     except SmokeError:
         print("ПРОВАЛ")
