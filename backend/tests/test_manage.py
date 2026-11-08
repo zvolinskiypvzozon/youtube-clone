@@ -21,8 +21,7 @@ from app.schemas.videos import VideoUpdateIn
 from app.services import manage as manage_service
 from app.services.publication import publish_if_due
 from app.worker import media, processor
-from tests.helpers import backend_pid, wait_for_lock_waiters
-from tests.test_videos import (
+from tests.helpers import (
     FAIL,
     HIDDEN,
     OK,
@@ -31,10 +30,12 @@ from tests.test_videos import (
     PUB,
     READY,
     UNL,
-    _auth,
-    _channel,
-    _user,
-    _video,
+    api_user,
+    auth_headers,
+    backend_pid,
+    channel_of,
+    seed_video,
+    wait_for_lock_waiters,
 )
 
 
@@ -55,8 +56,8 @@ async def _feed_ids(client: AsyncClient) -> set[str]:
 
 
 async def test_owner_updates_metadata(client: AsyncClient, db: AsyncSession) -> None:
-    owner = await _user(client, db)
-    video = await _video(db, await _channel(db, owner), PUB)
+    owner = await api_user(client, db)
+    video = await seed_video(db, await channel_of(db, owner), PUB)
 
     r = await client.patch(
         f"/api/videos/{video.id}",
@@ -80,8 +81,8 @@ async def test_owner_updates_metadata(client: AsyncClient, db: AsyncSession) -> 
 
 
 async def test_private_to_public_publishes_once(client: AsyncClient, db: AsyncSession) -> None:
-    owner = await _user(client, db)
-    video = await _video(db, await _channel(db, owner), PRIV)
+    owner = await api_user(client, db)
+    video = await seed_video(db, await channel_of(db, owner), PRIV)
     assert video.published_at is None
     assert str(video.id) not in await _feed_ids(client)
 
@@ -108,8 +109,8 @@ async def test_private_to_public_publishes_once(client: AsyncClient, db: AsyncSe
 async def test_visibility_before_ready_does_not_publish(
     client: AsyncClient, db: AsyncSession, status: VideoStatus
 ) -> None:
-    owner = await _user(client, db)
-    video = await _video(db, await _channel(db, owner), PRIV, status)
+    owner = await api_user(client, db)
+    video = await seed_video(db, await channel_of(db, owner), PRIV, status)
     r = await client.patch(
         f"/api/videos/{video.id}", json={"visibility": "public"}, headers=owner["auth"]
     )
@@ -121,8 +122,8 @@ async def test_visibility_before_ready_does_not_publish(
 async def test_owner_edits_hidden_video_but_it_stays_out_of_feed(
     client: AsyncClient, db: AsyncSession
 ) -> None:
-    owner = await _user(client, db)
-    video = await _video(db, await _channel(db, owner), PRIV, READY, HIDDEN)
+    owner = await api_user(client, db)
+    video = await seed_video(db, await channel_of(db, owner), PRIV, READY, HIDDEN)
     r = await client.patch(
         f"/api/videos/{video.id}", json={"visibility": "public"}, headers=owner["auth"]
     )
@@ -171,14 +172,14 @@ OPENS = {
 async def test_only_owner_can_update(
     client: AsyncClient, db: AsyncSession, viewer_kind: str
 ) -> None:
-    owner = await _user(client, db)
-    channel = await _channel(db, owner)
-    videos = {name: await _video(db, channel, *state) for name, state in STATES.items()}
+    owner = await api_user(client, db)
+    channel = await channel_of(db, owner)
+    videos = {name: await seed_video(db, channel, *state) for name, state in STATES.items()}
     roles = {"moderator": UserRole.moderator, "admin": UserRole.admin}
     viewer = (
         None
         if viewer_kind == "anon"
-        else await _user(client, db, roles.get(viewer_kind, UserRole.user))
+        else await api_user(client, db, roles.get(viewer_kind, UserRole.user))
     )
     if viewer_kind == "granted":
         db.add_all(
@@ -188,7 +189,7 @@ async def test_only_owner_can_update(
 
     for name, video in videos.items():
         r = await client.patch(
-            f"/api/videos/{video.id}", json={"title": "Взлом"}, headers=_auth(viewer)
+            f"/api/videos/{video.id}", json={"title": "Взлом"}, headers=auth_headers(viewer)
         )
         expected = 401 if viewer is None else 403 if name in OPENS[viewer_kind] else 404
         assert r.status_code == expected, (name, r.text)
@@ -198,8 +199,8 @@ async def test_only_owner_can_update(
 async def test_not_found_identical_for_missing_and_private(
     client: AsyncClient, db: AsyncSession
 ) -> None:
-    owner, stranger = await _user(client, db), await _user(client, db)
-    private = await _video(db, await _channel(db, owner), PRIV)
+    owner, stranger = await api_user(client, db), await api_user(client, db)
+    private = await seed_video(db, await channel_of(db, owner), PRIV)
     hidden = await client.patch(
         f"/api/videos/{private.id}", json={"title": "x"}, headers=stranger["auth"]
     )
@@ -227,8 +228,8 @@ async def test_not_found_identical_for_missing_and_private(
     ],
 )
 async def test_update_validation(client: AsyncClient, db: AsyncSession, payload: dict) -> None:
-    owner = await _user(client, db)
-    video = await _video(db, await _channel(db, owner), PRIV)
+    owner = await api_user(client, db)
+    video = await seed_video(db, await channel_of(db, owner), PRIV)
     r = await client.patch(f"/api/videos/{video.id}", json=payload, headers=owner["auth"])
     assert r.status_code == 422, (payload, r.text)
     stored = await _fresh(db, video.id)
@@ -242,7 +243,7 @@ async def test_update_via_cookie_requires_csrf(client: AsyncClient, db: AsyncSes
         json={"email": f"c_{s}@example.com", "username": f"c_{s}", "password": "pass-pass-1"},
     )
     owner = {"id": r.json()["id"]}
-    video = await _video(db, await _channel(db, owner), PRIV)
+    video = await seed_video(db, await channel_of(db, owner), PRIV)
 
     r = await client.patch(f"/api/videos/{video.id}", json={"title": "Без CSRF"})
     assert r.status_code == 403
@@ -267,8 +268,8 @@ async def test_update_waits_for_finalize_and_publishes(
 
     Сторона worker-а здесь повторяет _finalize вручную (lock_video → ready → publish_if_due);
     что настоящий _finalize вызывает publish_if_due, закрепляет test_worker (мутация M7)."""
-    owner = await _user(client, db)
-    video = await _video(db, await _channel(db, owner), PRIV, PROC)
+    owner = await api_user(client, db)
+    video = await seed_video(db, await channel_of(db, owner), PRIV, PROC)
 
     async with get_sessionmaker()() as worker_db:
         locked = await videos_repo.lock_video(worker_db, video.id)
@@ -299,8 +300,8 @@ async def test_denied_update_does_not_wait_for_row_lock(
 ) -> None:
     """Права проверяются до блокировки: чужой PATCH не встаёт в очередь на строку видео
     (иначе поток чужих запросов держал бы соединения пула и тормозил владельца и worker)."""
-    owner, other = await _user(client, db), await _user(client, db, role)
-    video = await _video(db, await _channel(db, owner), PUB)
+    owner, other = await api_user(client, db), await api_user(client, db, role)
+    video = await seed_video(db, await channel_of(db, owner), PUB)
 
     async with get_sessionmaker()() as worker_db:
         assert await videos_repo.lock_video(worker_db, video.id) is not None
@@ -320,8 +321,8 @@ async def test_finalize_waits_for_update_and_publishes(
     `_finalize` обязан дождаться commit правки и увидеть visibility=public — иначе видео
     станет ready + public без published_at. Обе стороны — настоящий код: сервис правки
     и финализация worker-а, каждая в своей сессии БД."""
-    owner = await _user(client, db)
-    video = await _video(db, await _channel(db, owner), PRIV, PROC)
+    owner = await api_user(client, db)
+    video = await seed_video(db, await channel_of(db, owner), PRIV, PROC)
     await videos_repo.enqueue_processing(db, video.id)
     await db.commit()
     async with get_sessionmaker()() as s:

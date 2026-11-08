@@ -12,30 +12,35 @@ from datetime import UTC, datetime, timedelta
 import httpx
 import pytest
 from httpx import AsyncClient
-from sqlalchemy import select, text, update
+from sqlalchemy import text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import storage
 from app.core.config import get_settings
 from app.models import (
-    Channel,
-    ModerationState,
-    User,
     UserRole,
     Video,
     VideoAccess,
     VideoFileKind,
-    VideoStatus,
-    VideoVisibility,
 )
 from app.repositories import videos as videos_repo
 from app.services import cursor, policies
-from tests.factories import create_video
-from tests.helpers import new_user
-
-PUB, UNL, PRIV = VideoVisibility.public, VideoVisibility.unlisted, VideoVisibility.private
-READY, PROC, FAIL = VideoStatus.ready, VideoStatus.processing, VideoStatus.failed
-OK, HIDDEN = ModerationState.ok, ModerationState.hidden
+from tests.helpers import (
+    FAIL,
+    HIDDEN,
+    MEDIA,
+    OK,
+    PRIV,
+    PROC,
+    PUB,
+    READY,
+    UNL,
+    api_user,
+    auth_headers,
+    channel_of,
+    put_media,
+    seed_video,
+)
 
 STATES = {
     "public": (PUB, READY, OK),
@@ -58,84 +63,19 @@ CAN_OPEN = {
 VIEWERS = tuple(CAN_OPEN)
 NOT_READY_STATES = {"processing", "failed"}
 
-MEDIA = {
-    VideoFileKind.mp4_720: (b"720" * 4000, "video/mp4", 720),
-    VideoFileKind.mp4_360: (b"360" * 3000, "video/mp4", 360),
-    VideoFileKind.thumbnail: (b"\xff\xd8thumb", "image/jpeg", None),
-}
-
 
 # --- Подготовка данных ----------------------------------------------------------------------
-
-
-async def _user(client: AsyncClient, db: AsyncSession, role: UserRole = UserRole.user) -> dict:
-    u = await new_user(client)
-    if role != UserRole.user:
-        await db.execute(update(User).where(User.id == uuid.UUID(u["id"])).values(role=role))
-        await db.commit()
-    return u
-
-
-async def _channel(db: AsyncSession, user: dict) -> Channel:
-    stmt = select(Channel).where(Channel.owner_id == uuid.UUID(user["id"]))
-    return (await db.execute(stmt)).scalar_one()
-
-
-async def _put_media(
-    db: AsyncSession, video: Video, kinds: tuple[VideoFileKind, ...] = tuple(MEDIA)
-) -> None:
-    bucket = get_settings().s3_bucket_media
-    for kind in kinds:
-        body, mime, height = MEDIA[kind]
-        key = f"videos/{video.id}/test/{kind.value}"
-        await asyncio.to_thread(
-            storage.get_s3().put_object, Bucket=bucket, Key=key, Body=body, ContentType=mime
-        )
-        await videos_repo.add_file(
-            db,
-            video_id=video.id,
-            kind=kind,
-            bucket=bucket,
-            key=key,
-            mime=mime,
-            size_bytes=len(body),
-            height=height,
-        )
-
-
-async def _video(
-    db: AsyncSession,
-    channel: Channel,
-    visibility: VideoVisibility = PUB,
-    status: VideoStatus = READY,
-    moderation: ModerationState = OK,
-    *,
-    media: bool = True,
-    published_at: datetime | None = None,
-) -> Video:
-    video = await create_video(db, channel, visibility=visibility, status=status)
-    video.moderation = moderation
-    if published_at is not None:
-        video.published_at = published_at
-    if media and status == READY:
-        await _put_media(db, video)
-    await db.commit()
-    return video
 
 
 async def _viewers(client: AsyncClient, db: AsyncSession) -> dict[str, dict | None]:
     return {
         "anon": None,
-        "stranger": await _user(client, db),
-        "granted": await _user(client, db),
-        "owner": await _user(client, db),
-        "moderator": await _user(client, db, UserRole.moderator),
-        "admin": await _user(client, db, UserRole.admin),
+        "stranger": await api_user(client, db),
+        "granted": await api_user(client, db),
+        "owner": await api_user(client, db),
+        "moderator": await api_user(client, db, UserRole.moderator),
+        "admin": await api_user(client, db, UserRole.admin),
     }
-
-
-def _auth(user: dict | None) -> dict:
-    return user["auth"] if user else {}
 
 
 # --- Карточка и поток: доступ ---------------------------------------------------------------
@@ -146,13 +86,13 @@ async def test_card_and_stream_access_matrix(
     client: AsyncClient, db: AsyncSession, viewer_kind: str
 ) -> None:
     viewers = await _viewers(client, db)
-    owner_channel = await _channel(db, viewers["owner"])
-    videos = {name: await _video(db, owner_channel, *state) for name, state in STATES.items()}
+    owner_channel = await channel_of(db, viewers["owner"])
+    videos = {name: await seed_video(db, owner_channel, *state) for name, state in STATES.items()}
     granted_id = uuid.UUID(viewers["granted"]["id"])
     db.add_all(VideoAccess(video_id=v.id, user_id=granted_id) for v in videos.values())
     await db.commit()
 
-    headers = _auth(viewers[viewer_kind])
+    headers = auth_headers(viewers[viewer_kind])
     card_ok, stream_ok = set(), set()
     for name, video in videos.items():
         card = await client.get(f"/api/videos/{video.id}", headers=headers)
@@ -175,8 +115,8 @@ async def test_card_and_stream_access_matrix(
 async def test_not_found_is_identical_for_missing_and_private(
     client: AsyncClient, db: AsyncSession
 ) -> None:
-    owner, stranger = await _user(client, db), await _user(client, db)
-    private = await _video(db, await _channel(db, owner), PRIV)
+    owner, stranger = await api_user(client, db), await api_user(client, db)
+    private = await seed_video(db, await channel_of(db, owner), PRIV)
     for suffix in ("", "/stream"):
         hidden = await client.get(f"/api/videos/{private.id}{suffix}", headers=stranger["auth"])
         missing = await client.get(f"/api/videos/{uuid.uuid4()}{suffix}", headers=stranger["auth"])
@@ -185,9 +125,9 @@ async def test_not_found_is_identical_for_missing_and_private(
 
 
 async def test_card_state_only_for_owner_and_staff(client: AsyncClient, db: AsyncSession) -> None:
-    owner, stranger = await _user(client, db), await _user(client, db)
-    moderator = await _user(client, db, UserRole.moderator)
-    video = await _video(db, await _channel(db, owner), PUB, READY, HIDDEN)
+    owner, stranger = await api_user(client, db), await api_user(client, db)
+    moderator = await api_user(client, db, UserRole.moderator)
+    video = await seed_video(db, await channel_of(db, owner), PUB, READY, HIDDEN)
     video.moderation_reason = "Нарушение правил"
     await db.commit()
 
@@ -214,8 +154,8 @@ async def test_card_state_only_for_owner_and_staff(client: AsyncClient, db: Asyn
 
 
 async def test_stream_urls_serve_files_with_range(client: AsyncClient, db: AsyncSession) -> None:
-    owner = await _user(client, db)
-    video = await _video(db, await _channel(db, owner))
+    owner = await api_user(client, db)
+    video = await seed_video(db, await channel_of(db, owner))
     r = await client.get(f"/api/videos/{video.id}/stream")
     assert r.status_code == 200, r.text
     body = r.json()
@@ -236,9 +176,9 @@ async def test_stream_urls_serve_files_with_range(client: AsyncClient, db: Async
 
 
 async def test_stream_only_existing_qualities(client: AsyncClient, db: AsyncSession) -> None:
-    owner = await _user(client, db)
-    video = await _video(db, await _channel(db, owner), media=False)
-    await _put_media(db, video, (VideoFileKind.mp4_360,))
+    owner = await api_user(client, db)
+    video = await seed_video(db, await channel_of(db, owner), media=False)
+    await put_media(db, video, (VideoFileKind.mp4_360,))
     await db.commit()
     body = (await client.get(f"/api/videos/{video.id}/stream")).json()
     assert [s["quality"] for s in body["sources"]] == ["360p"]
@@ -249,9 +189,9 @@ async def test_stream_ready_without_transcodes_is_conflict(
     client: AsyncClient, db: AsyncSession
 ) -> None:
     """ready без mp4 (нарушение данных) — 409, а не пустой список источников."""
-    owner = await _user(client, db)
-    video = await _video(db, await _channel(db, owner), media=False)
-    await _put_media(db, video, (VideoFileKind.thumbnail,))
+    owner = await api_user(client, db)
+    video = await seed_video(db, await channel_of(db, owner), media=False)
+    await put_media(db, video, (VideoFileKind.thumbnail,))
     await db.commit()
     r = await client.get(f"/api/videos/{video.id}/stream")
     assert r.status_code == 409
@@ -261,8 +201,8 @@ async def test_stream_url_expires(
     client: AsyncClient, db: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(get_settings(), "stream_url_ttl_seconds", 1)
-    owner = await _user(client, db)
-    video = await _video(db, await _channel(db, owner))
+    owner = await api_user(client, db)
+    video = await seed_video(db, await channel_of(db, owner))
     url = (await client.get(f"/api/videos/{video.id}/stream")).json()["sources"][0]["url"]
     await asyncio.sleep(2.5)
     async with httpx.AsyncClient() as raw:
@@ -270,8 +210,8 @@ async def test_stream_url_expires(
 
 
 async def test_viewing_responses_are_not_cached(client: AsyncClient, db: AsyncSession) -> None:
-    owner = await _user(client, db)
-    video = await _video(db, await _channel(db, owner))
+    owner = await api_user(client, db)
+    video = await seed_video(db, await channel_of(db, owner))
     for path in (
         f"/api/videos/{video.id}",
         f"/api/videos/{video.id}/stream",
@@ -292,8 +232,8 @@ async def test_signing_does_not_depend_on_request_host(
 ) -> None:
     """DoS из аудита: каждый новый Host создавал клиента подписи (~0,35 с CPU под общей
     блокировкой). Теперь Host запроса в подпись не входит — клиент один на процесс."""
-    owner = await _user(client, db)
-    video = await _video(db, await _channel(db, owner))
+    owner = await api_user(client, db)
+    video = await seed_video(db, await channel_of(db, owner))
     for i in range(40):
         r = await client.get(f"/api/videos/{video.id}/stream", headers={"Host": f"h{i}.example"})
         assert r.status_code == 200, r.text
@@ -310,8 +250,8 @@ async def test_relative_url_valid_only_via_signing_host(
     client: AsyncClient, db: AsyncSession, relative_urls: None
 ) -> None:
     """Так ходит nginx: тот же путь и подпись, Host = SIGNING_HOST. С другим Host — 403."""
-    owner = await _user(client, db)
-    video = await _video(db, await _channel(db, owner))
+    owner = await api_user(client, db)
+    video = await seed_video(db, await channel_of(db, owner))
     url = (await client.get(f"/api/videos/{video.id}/stream")).json()["sources"][0]["url"]
     async with httpx.AsyncClient(base_url="http://storage:9000") as raw:
         ok = await raw.get(url, headers={"Host": storage.SIGNING_HOST, "Range": "bytes=0-9"})
@@ -326,12 +266,12 @@ async def test_relative_url_valid_only_via_signing_host(
 
 async def _catalog_world(client: AsyncClient, db: AsyncSession) -> tuple[dict, dict, set]:
     """Два канала со всеми состояниями; возвращает (владелец1, владелец2, id публичных)."""
-    a, b = await _user(client, db), await _user(client, db)
+    a, b = await api_user(client, db), await api_user(client, db)
     listed = set()
     for owner in (a, b):
-        channel = await _channel(db, owner)
+        channel = await channel_of(db, owner)
         for name, state in STATES.items():
-            video = await _video(db, channel, *state, media=name == "public")
+            video = await seed_video(db, channel, *state, media=name == "public")
             if name == "public":
                 listed.add(video.id)
     return a, b, listed
@@ -354,7 +294,7 @@ async def _all_pages(client: AsyncClient, path: str, headers: dict, limit: int) 
 
 async def test_feed_shows_only_catalog_for_everyone(client: AsyncClient, db: AsyncSession) -> None:
     a, _, listed = await _catalog_world(client, db)
-    moderator = await _user(client, db, UserRole.moderator)
+    moderator = await api_user(client, db, UserRole.moderator)
     for headers in ({}, a["auth"], moderator["auth"]):
         items = await _all_pages(client, "/api/videos", headers, limit=50)
         assert {uuid.UUID(i["id"]) for i in items} == listed
@@ -364,12 +304,12 @@ async def test_feed_shows_only_catalog_for_everyone(client: AsyncClient, db: Asy
 async def test_feed_pagination_with_equal_published_at(
     client: AsyncClient, db: AsyncSession
 ) -> None:
-    owner = await _user(client, db)
-    channel = await _channel(db, owner)
+    owner = await api_user(client, db)
+    channel = await channel_of(db, owner)
     same = datetime.now(UTC) - timedelta(hours=1)
-    videos = [await _video(db, channel, media=False, published_at=same) for _ in range(5)]
+    videos = [await seed_video(db, channel, media=False, published_at=same) for _ in range(5)]
     videos += [
-        await _video(db, channel, media=False, published_at=same + timedelta(minutes=i))
+        await seed_video(db, channel, media=False, published_at=same + timedelta(minutes=i))
         for i in (1, 2)
     ]
     items = await _all_pages(client, "/api/videos", {}, limit=2)
@@ -398,7 +338,7 @@ async def test_feed_rejects_bad_cursor_and_limit(client: AsyncClient) -> None:
 
 
 async def test_channel_card(client: AsyncClient, db: AsyncSession) -> None:
-    owner = await _user(client, db)
+    owner = await api_user(client, db)
     r = await client.get(f"/api/channels/{owner['username'].upper()}")  # handle без учёта регистра
     assert r.status_code == 200
     assert r.json()["handle"] == owner["username"]
@@ -410,7 +350,7 @@ async def test_channel_videos_only_catalog_of_that_channel(
     client: AsyncClient, db: AsyncSession
 ) -> None:
     a, b, listed = await _catalog_world(client, db)
-    channel_a = await _channel(db, a)
+    channel_a = await channel_of(db, a)
     expected = {
         v
         for v in listed
