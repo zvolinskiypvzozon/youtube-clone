@@ -22,8 +22,7 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install ruff==0.11.8
-      - run: ruff check backend && ruff format --check backend
-      - run: ruff check --line-length 100 scripts && ruff format --check --line-length 100 scripts
+      - run: ruff check backend scripts && ruff format --check backend scripts
       - uses: actions/setup-node@v4
         with:
           node-version: "22"

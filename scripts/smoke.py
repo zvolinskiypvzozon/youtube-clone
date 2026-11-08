@@ -59,14 +59,14 @@ def http(method: str, path: str, *, data=None, headers=None, form=None) -> tuple
     if form is not None:
         body = urllib.parse.urlencode(form).encode()
         hdrs["Content-Type"] = "application/x-www-form-urlencoded"
-    elif isinstance(data, (bytes, bytearray)):
+    elif isinstance(data, bytes | bytearray):
         body = bytes(data)
     elif data is not None:
         body = json.dumps(data).encode()
         hdrs["Content-Type"] = "application/json"
     req = urllib.request.Request(url, data=body, method=method, headers=hdrs)
     try:
-        with urllib.request.urlopen(req, timeout=60) as resp:  # noqa: S310 — адрес задаёт оператор
+        with urllib.request.urlopen(req, timeout=60) as resp:
             return resp.status, dict(resp.headers), resp.read()
     except urllib.error.HTTPError as exc:
         return exc.code, dict(exc.headers), exc.read()
@@ -158,11 +158,11 @@ def upload(auth: dict[str, str], video: bytes) -> str:
 def wait_ready(video_id: str) -> None:
     deadline = time.monotonic() + PROCESSING_TIMEOUT
     while time.monotonic() < deadline:
-        status = sql(f"SELECT status FROM videos WHERE id = '{video_id}'")
+        status = sql(f"SELECT status FROM videos WHERE id = '{video_id}'")  # noqa: S608 — id из API
         if status == "ready":
             return
         if status == "failed":
-            reason = sql(f"SELECT failure_reason FROM videos WHERE id = '{video_id}'")
+            reason = sql(f"SELECT failure_reason FROM videos WHERE id = '{video_id}'")  # noqa: S608
             raise AssertionError(f"видео failed: {reason}")
         time.sleep(2)
     raise AssertionError(f"не готово за {PROCESSING_TIMEOUT} с")
@@ -171,7 +171,7 @@ def wait_ready(video_id: str) -> None:
 @step("Результаты: 360p, 720p, превью; исходник удалён")
 def check_files(video_id: str) -> None:
     kinds = sql(
-        f"SELECT string_agg(kind::text, ',' ORDER BY kind) FROM video_files "
+        f"SELECT string_agg(kind::text, ',' ORDER BY kind) FROM video_files "  # noqa: S608
         f"WHERE video_id = '{video_id}'"
     )
     if kinds != "mp4_360,mp4_720,thumbnail":

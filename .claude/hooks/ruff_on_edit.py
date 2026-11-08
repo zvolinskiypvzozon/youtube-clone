@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""PostToolUse-хук: после правки .py в backend/ запускает ruff format и ruff check --fix.
+"""PostToolUse-хук: после правки .py в backend/ или scripts/ запускает ruff format и ruff check --fix.
 
 Если остались ошибки, которые ruff не исправил сам, — exit 2: stderr уходит агенту,
 и он обязан их исправить до продолжения работы.
@@ -22,18 +22,20 @@ def main() -> int:
     path = Path(file_path)
     if path.suffix != ".py" or not path.is_file():
         return 0
-    backend = project / "backend"
-    if backend not in path.resolve().parents:
+    # Конфиг ruff находится по пути файла: backend/pyproject.toml, scripts/ruff.toml (extend).
+    roots = (project / "backend", project / "scripts")
+    root = next((r for r in roots if r in path.resolve().parents), None)
+    if root is None:
         return 0
     ruff = project / ".venv" / "bin" / "ruff"
     if not ruff.exists():
         print("ruff_on_edit: .venv/bin/ruff не найден — пропускаю", file=sys.stderr)
         return 0
 
-    subprocess.run([ruff, "format", "--quiet", str(path)], cwd=backend, check=False)
+    subprocess.run([ruff, "format", "--quiet", str(path)], cwd=root, check=False)
     result = subprocess.run(
         [ruff, "check", "--fix", "--quiet", str(path)],
-        cwd=backend,
+        cwd=root,
         capture_output=True,
         text=True,
         check=False,
