@@ -60,7 +60,7 @@ jobs:
             sleep 3
           done
           exit 1
-      - name: Smoke — register, upload, process to ready
+      - name: Smoke — upload, process, playback, privacy, access, delete (API only)
         run: python3 scripts/smoke.py http://127.0.0.1
       - name: Storage is not reachable without signature
         run: test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1/yt-media/x)" = "403"

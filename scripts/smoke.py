@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Сквозная проверка развёрнутого стека: регистрация → загрузка видео → обработка → ready.
+"""Сквозная проверка развёрнутого стека через API: регистрация → загрузка → обработка →
+просмотр → приватность и управление (допуск, удаление).
 
 Запуск из каталога репозитория (нужен доступ к docker — тестовое видео генерирует ffmpeg
 из контейнера worker, на хосте ffmpeg не нужен):
@@ -9,10 +10,9 @@
 
 Только стандартная библиотека Python 3. Код выхода 0 — всё прошло.
 
-Сценарий из ТЗ «регистрация → загрузка → просмотр → лайк и комментарий» скрипт расширит,
-когда появятся соответствующие API (дни 4–5): лента и поток (Range 206, неверная подпись 403)
-уже проверяются. До появления GET /api/videos/{id} статус
-обработки читается из БД через `docker compose exec postgres` (TEMPORARY).
+Сценарий из ТЗ «регистрация → загрузка → просмотр → лайк и комментарий»: лайк и комментарий
+добавятся с их API (день 5). Состояние видео читается только через API (карточка владельца),
+без доступа к БД.
 """
 
 import json
@@ -77,22 +77,13 @@ def expect(status: int, wanted: int, body: bytes) -> None:
         raise AssertionError(f"HTTP {status}, ожидался {wanted}: {body[:200]!r}")
 
 
-def compose(*args: str, stdin: bytes | None = None) -> bytes:
+def compose(*args: str) -> bytes:
     result = subprocess.run(
-        ["docker", "compose", *args], cwd=REPO, input=stdin, capture_output=True, check=False
+        ["docker", "compose", *args], cwd=REPO, capture_output=True, check=False
     )
     if result.returncode != 0:
         raise RuntimeError(result.stderr.decode(errors="replace").strip()[-300:])
     return result.stdout
-
-
-def sql(query: str) -> str:
-    """TEMPORARY: до GET /api/videos/{id} (день 4)."""
-    out = compose(
-        "exec", "-T", "postgres", "sh", "-c", 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tA',
-        stdin=query.encode(),
-    )  # fmt: skip
-    return out.decode().strip()
 
 
 @step("API отвечает (/api/health)")
@@ -103,16 +94,23 @@ def check_health() -> None:
         raise AssertionError(body.decode())
 
 
-@step("Регистрация и вход")
-def register() -> dict[str, str]:
+def new_user() -> dict:
+    """Регистрирует пользователя: id, ник и Bearer-заголовок."""
     name = f"smoke_{secrets.token_hex(4)}"
     password = secrets.token_urlsafe(12)
     creds = {"email": f"{name}@example.com", "username": name, "password": password}
     status, _, body = http("POST", "/api/auth/register", data=creds)
     expect(status, 201, body)
+    user_id = json.loads(body)["id"]
     status, _, body = http("POST", "/api/auth/token", form={"username": name, "password": password})
     expect(status, 200, body)
-    return {"Authorization": f"Bearer {json.loads(body)['access_token']}"}
+    auth = {"Authorization": f"Bearer {json.loads(body)['access_token']}"}
+    return {"id": user_id, "username": name, "auth": auth}
+
+
+@step("Регистрация и вход")
+def register() -> dict:
+    return new_user()
 
 
 @step("Тестовое видео 1280×720, 5 с (ffmpeg из контейнера worker)")
@@ -154,28 +152,45 @@ def upload(auth: dict[str, str], video: bytes) -> str:
     return started["video_id"]
 
 
-@step("Обработка worker-ом до статуса ready")
-def wait_ready(video_id: str) -> None:
+@step("Обработка worker-ом до статуса ready (карточка владельца)")
+def wait_ready(owner: dict, video_id: str) -> None:
     deadline = time.monotonic() + PROCESSING_TIMEOUT
     while time.monotonic() < deadline:
-        status = sql(f"SELECT status FROM videos WHERE id = '{video_id}'")  # noqa: S608 — id из API
-        if status == "ready":
+        status, _, body = http("GET", f"/api/videos/{video_id}", headers=owner["auth"])
+        if status == 503:  # строка занята worker-ом (lock_timeout) — повторить
+            time.sleep(2)
+            continue
+        expect(status, 200, body)
+        state = json.loads(body)["state"]
+        if state is None:
+            raise AssertionError("владелец не получил служебное состояние видео")
+        if state["status"] == "ready":
             return
-        if status == "failed":
-            reason = sql(f"SELECT failure_reason FROM videos WHERE id = '{video_id}'")  # noqa: S608
-            raise AssertionError(f"видео failed: {reason}")
+        if state["status"] == "failed":
+            raise AssertionError(f"видео failed: {state['failure_reason']}")
         time.sleep(2)
     raise AssertionError(f"не готово за {PROCESSING_TIMEOUT} с")
 
 
-@step("Результаты: 360p, 720p, превью; исходник удалён")
-def check_files(video_id: str) -> None:
-    kinds = sql(
-        f"SELECT string_agg(kind::text, ',' ORDER BY kind) FROM video_files "  # noqa: S608
-        f"WHERE video_id = '{video_id}'"
-    )
-    if kinds != "mp4_360,mp4_720,thumbnail":
-        raise AssertionError(f"файлы: {kinds}")
+@step("Результаты: превью и длительность в карточке, «Мои видео»")
+def check_card(owner: dict, video_id: str) -> None:
+    status, _, body = http("GET", f"/api/videos/{video_id}")  # без входа: видео публичное
+    expect(status, 200, body)
+    card = json.loads(body)
+    if card["state"] is not None:
+        raise AssertionError("служебное состояние видно анониму")
+    if card["duration_seconds"] != 5:
+        raise AssertionError(f"длительность {card['duration_seconds']}")
+    if not card["thumbnail_url"]:
+        raise AssertionError("нет превью")
+    status, headers, body = http("GET", card["thumbnail_url"])
+    expect(status, 200, body)
+    if not body.startswith(b"\xff\xd8") or header(headers, "Content-Type") != "image/jpeg":
+        raise AssertionError(f"превью не JPEG: {header(headers, 'Content-Type')}")
+    status, _, body = http("GET", "/api/me/videos", headers=owner["auth"])
+    expect(status, 200, body)
+    if [i["id"] for i in json.loads(body)["items"]] != [video_id]:
+        raise AssertionError("видео нет в «Моих видео»")
 
 
 def header(headers: dict, name: str) -> str | None:
@@ -184,7 +199,7 @@ def header(headers: dict, name: str) -> str | None:
 
 
 @step("Лента и поток: видео в GET /api/videos, Range 206, подпись проверяется")
-def check_playback(video_id: str) -> None:
+def check_playback(video_id: str) -> str:
     status, _, body = http("GET", "/api/videos")
     expect(status, 200, body)
     if video_id not in {item["id"] for item in json.loads(body)["items"]}:
@@ -212,6 +227,7 @@ def check_playback(video_id: str) -> None:
     expect(status, 403, body)
     if header(headers, "Cache-Control") is not None:
         raise AssertionError(f"Cache-Control у 403: {header(headers, 'Cache-Control')}")
+    return url
 
 
 @step("Хранилище закрыто: без подписи 403")
@@ -221,21 +237,93 @@ def check_storage_closed(video_id: str) -> None:
         expect(status, 403, body)
 
 
+@step("Приватность: чужому и анониму 404, допуск открывает, отзыв закрывает")
+def check_privacy(owner: dict, video_id: str) -> None:
+    other = new_user()
+    status, _, body = http(
+        "PATCH", f"/api/videos/{video_id}", data={"visibility": "private"}, headers=owner["auth"]
+    )
+    expect(status, 200, body)
+    if json.loads(body)["state"]["visibility"] != "private":
+        raise AssertionError("PATCH не сделал видео приватным")
+
+    def opens(headers: dict) -> bool:
+        card, _, card_body = http("GET", f"/api/videos/{video_id}", headers=headers)
+        stream, _, _ = http("GET", f"/api/videos/{video_id}/stream", headers=headers)
+        if card != stream or card not in (200, 404):
+            raise AssertionError(f"карточка {card}, поток {stream}: {card_body[:200]!r}")
+        return card == 200
+
+    if not opens(owner["auth"]):
+        raise AssertionError("владелец не открыл своё приватное видео")
+    if opens({}) or opens(other["auth"]):
+        raise AssertionError("приватное видео открылось без допуска")
+    status, _, body = http("GET", "/api/videos")
+    expect(status, 200, body)
+    if video_id in {item["id"] for item in json.loads(body)["items"]}:
+        raise AssertionError("приватное видео в ленте")
+
+    access = f"/api/videos/{video_id}/access"
+    grant = {"username": other["username"]}
+    status, _, body = http("POST", access, data=grant, headers=owner["auth"])
+    expect(status, 201, body)
+    if not opens(other["auth"]):
+        raise AssertionError("допуск не открыл видео")
+    status, _, body = http("DELETE", f"{access}/{other['id']}", headers=owner["auth"])
+    expect(status, 204, body)
+    if opens(other["auth"]):
+        raise AssertionError("после отзыва видео открывается")
+
+
+@step("Удаление: 204, затем 404, пустые «Мои видео», файла в хранилище нет")
+def check_delete(owner: dict, video_id: str, media_url: str) -> None:
+    status, _, body = http("DELETE", f"/api/videos/{video_id}", headers=owner["auth"])
+    expect(status, 204, body)
+    # Подписанная ссылка на 720p ещё действует (TTL 15 мин): объекта нет → 404 от хранилища.
+    # 403 означал бы проблему подписи, а 206/200 — что файл не удалён.
+    status, _, body = http("GET", media_url, headers={"Range": "bytes=0-99"})
+    expect(status, 404, body)
+    status, _, body = http("GET", f"/api/videos/{video_id}", headers=owner["auth"])
+    expect(status, 404, body)
+    status, _, body = http("GET", "/api/me/videos", headers=owner["auth"])
+    expect(status, 200, body)
+    if json.loads(body)["items"]:
+        raise AssertionError("удалённое видео осталось в «Моих видео»")
+
+
+def cleanup(owner: dict, video_id: str) -> None:
+    """После провала — удалить тестовое видео, чтобы оно не осталось в ленте стека
+    (best effort: на код выхода не влияет). Пользователи smoke_* остаются."""
+    try:
+        http("DELETE", f"/api/videos/{video_id}", headers=owner["auth"])
+    except Exception as exc:  # уборка не должна маскировать провал
+        print(f"  (не удалось удалить тестовое видео {video_id}: {exc})")
+
+
 def main() -> int:
     print(f"Smoke-проверка {BASE}")
     started = time.monotonic()
+    owner: dict | None = None
+    video_id: str | None = None
+    deleted = False
     try:
         check_health()
-        auth = register()
+        owner = register()
         video = make_video()
-        video_id = upload(auth, video)
-        wait_ready(video_id)
-        check_files(video_id)
-        check_playback(video_id)
+        video_id = upload(owner["auth"], video)
+        wait_ready(owner, video_id)
+        check_card(owner, video_id)
+        media_url = check_playback(video_id)
         check_storage_closed(video_id)
+        check_privacy(owner, video_id)
+        check_delete(owner, video_id, media_url)
+        deleted = True
     except SmokeError:
         print("ПРОВАЛ")
         return 1
+    finally:
+        if owner is not None and video_id is not None and not deleted:
+            cleanup(owner, video_id)
     print(f"OK за {time.monotonic() - started:.0f} с")
     return 0
 
