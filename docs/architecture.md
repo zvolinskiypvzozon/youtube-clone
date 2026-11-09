@@ -81,8 +81,10 @@ flowchart LR
 | `DELETE /api/videos/{id}/access/{user_id}` | Отозвать допуск; идемпотентно, 204 | как `PATCH` |
 | `GET /api/channels/{handle}` | Карточка канала | всем |
 | `GET /api/channels/{handle}/videos` | Видео канала | каталог |
+| `GET /api/me/videos?cursor=&limit=` | «Мои видео»: свои видео в любом статусе со `state`, новые загрузки сверху (keyset по `created_at, id`) | вход; только свой канал (`owned_filter`), и для staff |
 
-Списки — keyset-пагинация по `(published_at, id)` с непрозрачным курсором (`next_cursor = null`
+Списки — keyset-пагинация по `(момент времени, id)` — `published_at` в каталоге, `created_at`
+в «Моих видео» — с непрозрачным курсором (`next_cursor = null`
 на последней странице), `limit` 1–50. Все ответы — `Cache-Control: no-store`: в них подписанные
 ссылки. Правила доступа — ADR 0006 и дополнения 1–2.
 

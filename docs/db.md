@@ -9,6 +9,7 @@ PostgreSQL 17. Схема ведётся миграциями Alembic (`backend/
 | Миграция | Таблицы | День |
 |---|---|---|
 | `c7a041934a27` initial schema | users, channels, sessions, videos, video_files, video_access, jobs | 2 |
+| `d39fd7e9e8b8` ix_videos_channel_created | индекс «Моих видео» | 4 |
 | — | reactions, comments | 4–5 |
 | — | subscriptions, playlists, playlist_items | 5 |
 | — | reports, moderation_log | 6 |
@@ -173,6 +174,7 @@ API — 5 с, worker — 30 с.
 |---|---|
 | Лента главной: готовые публичные не скрытые, новые сверху | `ix_videos_feed` — частичный по `(published_at DESC, id DESC)` (`id` — tie-breaker для keyset-пагинации) с `WHERE status='ready' AND visibility='public' AND moderation='ok'`. Скрытые и приватные в индекс не попадают |
 | Видео канала | `ix_videos_channel_published (channel_id, published_at DESC, id DESC)` |
+| «Мои видео»: все видео своего канала в любом статусе, новые загрузки сверху | `ix_videos_channel_created (channel_id, created_at DESC, id DESC)`; условие — равенство со скалярным подзапросом канала (`policies.owned_filter`), порядок берётся из индекса без сортировки (тест плана) |
 | Поиск по названию (`ILIKE '%…%'`) | `ix_videos_title_trgm` — GIN `gin_trgm_ops`: подстрока без учёта регистра, без полного сканирования |
 | Сессия по токену из cookie | `uq_sessions_token_hash` |
 | Очистка просроченных сессий | `ix_sessions_expires_at` |
