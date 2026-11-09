@@ -19,6 +19,7 @@ from app.models import (
     User,
     UserRole,
     Video,
+    VideoAccess,
     VideoFileKind,
     VideoStatus,
     VideoVisibility,
@@ -151,3 +152,48 @@ async def seed_video(
 
 def auth_headers(user: dict | None) -> dict:
     return user["auth"] if user else {}
+
+
+# --- Матрица отказов в управлении (ADR 0006, доп. 2) ----------------------------------------
+
+MANAGE_STATES = {
+    "public": (PUB, READY, OK),
+    "unlisted": (UNL, READY, OK),
+    "private": (PRIV, READY, OK),
+    "hidden": (PUB, READY, HIDDEN),
+    "processing": (PUB, PROC, OK),
+    "failed": (PUB, FAIL, OK),
+}
+# Кто может открыть видео (can_view) — но не управлять: 403. Остальным — 404.
+MANAGE_OPENS = {
+    "stranger": {"public", "unlisted"},
+    "granted": {"public", "unlisted", "private"},
+    "moderator": set(MANAGE_STATES),
+    "admin": set(MANAGE_STATES),
+}
+MANAGE_VIEWERS = [*MANAGE_OPENS, "anon"]
+
+
+async def manage_matrix(
+    client: AsyncClient, db: AsyncSession, owner: dict, viewer_kind: str
+) -> tuple[dict[str, Video], dict | None]:
+    """Видео владельца во всех состояниях MANAGE_STATES и зритель вида `viewer_kind`
+    (None — аноним; granted — в списке допуска всех видео)."""
+    channel = await channel_of(db, owner)
+    videos = {name: await seed_video(db, channel, *state) for name, state in MANAGE_STATES.items()}
+    roles = {"moderator": UserRole.moderator, "admin": UserRole.admin}
+    viewer = (
+        None
+        if viewer_kind == "anon"
+        else await api_user(client, db, roles.get(viewer_kind, UserRole.user))
+    )
+    if viewer_kind == "granted":
+        db.add_all(
+            VideoAccess(video_id=v.id, user_id=uuid.UUID(viewer["id"])) for v in videos.values()
+        )
+        await db.commit()
+    return videos, viewer
+
+
+def manage_expected(viewer_kind: str, state: str) -> int:
+    return 401 if viewer_kind == "anon" else 403 if state in MANAGE_OPENS[viewer_kind] else 404

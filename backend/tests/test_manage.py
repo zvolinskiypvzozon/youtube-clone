@@ -14,7 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_sessionmaker
-from app.models import User, UserRole, Video, VideoAccess, VideoStatus, VideoVisibility
+from app.models import User, UserRole, Video, VideoStatus, VideoVisibility
 from app.repositories import jobs as jobs_repo
 from app.repositories import videos as videos_repo
 from app.schemas.videos import VideoUpdateIn
@@ -24,7 +24,7 @@ from app.worker import media, processor
 from tests.helpers import (
     FAIL,
     HIDDEN,
-    OK,
+    MANAGE_VIEWERS,
     PRIV,
     PROC,
     PUB,
@@ -34,6 +34,8 @@ from tests.helpers import (
     auth_headers,
     backend_pid,
     channel_of,
+    manage_expected,
+    manage_matrix,
     seed_video,
     wait_for_lock_waiters,
 )
@@ -151,47 +153,19 @@ def test_publish_if_due(status: VideoStatus, visibility: VideoVisibility) -> Non
 
 # --- Отказы: 401 / 403 / 404 ----------------------------------------------------------------
 
-STATES = {
-    "public": (PUB, READY, OK),
-    "unlisted": (UNL, READY, OK),
-    "private": (PRIV, READY, OK),
-    "hidden": (PUB, READY, HIDDEN),
-    "processing": (PUB, PROC, OK),
-    "failed": (PUB, FAIL, OK),
-}
-# Кто может открыть видео (can_view) — но не управлять: 403. Остальным — 404.
-OPENS = {
-    "stranger": {"public", "unlisted"},
-    "granted": {"public", "unlisted", "private"},
-    "moderator": set(STATES),
-    "admin": set(STATES),
-}
 
-
-@pytest.mark.parametrize("viewer_kind", [*OPENS, "anon"])
+@pytest.mark.parametrize("viewer_kind", MANAGE_VIEWERS)
 async def test_only_owner_can_update(
     client: AsyncClient, db: AsyncSession, viewer_kind: str
 ) -> None:
     owner = await api_user(client, db)
-    channel = await channel_of(db, owner)
-    videos = {name: await seed_video(db, channel, *state) for name, state in STATES.items()}
-    roles = {"moderator": UserRole.moderator, "admin": UserRole.admin}
-    viewer = (
-        None
-        if viewer_kind == "anon"
-        else await api_user(client, db, roles.get(viewer_kind, UserRole.user))
-    )
-    if viewer_kind == "granted":
-        db.add_all(
-            VideoAccess(video_id=v.id, user_id=uuid.UUID(viewer["id"])) for v in videos.values()
-        )
-        await db.commit()
+    videos, viewer = await manage_matrix(client, db, owner, viewer_kind)
 
     for name, video in videos.items():
         r = await client.patch(
             f"/api/videos/{video.id}", json={"title": "Взлом"}, headers=auth_headers(viewer)
         )
-        expected = 401 if viewer is None else 403 if name in OPENS[viewer_kind] else 404
+        expected = manage_expected(viewer_kind, name)
         assert r.status_code == expected, (name, r.text)
         assert (await _fresh(db, video.id)).title != "Взлом"
 
