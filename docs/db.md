@@ -10,8 +10,9 @@ PostgreSQL 17. Схема ведётся миграциями Alembic (`backend/
 |---|---|---|
 | `c7a041934a27` initial schema | users, channels, sessions, videos, video_files, video_access, jobs | 2 |
 | `d39fd7e9e8b8` ix_videos_channel_created | индекс «Моих видео» | 4 |
-| — | reactions, comments | 4–5 |
-| — | subscriptions, playlists, playlist_items | 5 |
+| `feae87d73a60` reactions | reactions (лайк/дизлайк) | 5 |
+| — | comments, subscriptions | 5 |
+| — | playlists, playlist_items | 6 |
 | — | reports, moderation_log | 6 |
 | — | watch_history | 8–9 |
 
@@ -26,6 +27,8 @@ erDiagram
     videos ||--o{ video_access : "список допуска"
     users ||--o{ video_access : "допущен к"
     videos ||--o{ jobs : "обработка"
+    videos ||--o{ reactions : "лайки и дизлайки"
+    users ||--o{ reactions : "реагирует"
 
     users {
         uuid id PK
@@ -92,6 +95,12 @@ erDiagram
         uuid user_id PK,FK
         timestamptz granted_at
     }
+    reactions {
+        uuid video_id PK,FK
+        uuid user_id PK,FK
+        reaction_kind kind "like | dislike"
+        timestamptz created_at
+    }
     jobs {
         uuid id PK
         job_type type "process_video"
@@ -137,6 +146,13 @@ lease не перезапишет результат того, кто перех
 **Денормализованные счётчики** (`views_count`, `likes_count`, `subscribers_count` и т.п.).
 Лента и карточки показывают их без `COUNT(*)` по большим таблицам. Счётчики обновляются в той же
 транзакции, что и исходное действие. CHECK `>= 0` ловит ошибку в коде, из-за которой счётчик ушёл бы в минус.
+Реакции: одна строка на пару (видео, пользователь) — лайк и дизлайк взаимоисключающие;
+все изменения реакций одного видео сериализуются блокировкой строки видео (`FOR NO KEY UPDATE`),
+прежняя реакция читается под ней, счётчики меняются на разницу «было → стало» (K6).
+Изменение счётчиков не сдвигает `videos.updated_at` (время правки метаданных).
+**Известное ограничение:** реакции (а с шагов 2 и 5 — комментарии и просмотры) популярного
+видео сериализуются на одной строке `videos`; при очереди дольше `lock_timeout` — 503.
+Для масштаба тестового задания приемлемо; дальше — отдельная таблица счётчиков.
 
 **Ограничения целостности в БД, а не только в коде:**
 
@@ -180,6 +196,7 @@ API — 5 с, worker — 30 с.
 | Очистка просроченных сессий | `ix_sessions_expires_at` |
 | Следующая задача для worker | `ix_jobs_queued (run_after) WHERE status='queued'` |
 | Задачи с истёкшим lease (упавший worker) | `ix_jobs_running_lease (locked_until) WHERE status='running'` |
+| «Понравившиеся» (день 9), каскад при удалении пользователя | `ix_reactions_user_kind_created (user_id, kind, created_at DESC)` (PK начинается с `video_id`); смена реакции обновляет `created_at` |
 | «Доступные мне» приватные видео, новые выдачи сверху | `ix_video_access_user_granted (user_id, granted_at DESC)` (PK начинается с `video_id`) |
 | Каскадное удаление видео → задачи (done/failed копятся) | `ix_jobs_video_id` |
 
