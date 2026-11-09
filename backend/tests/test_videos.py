@@ -12,7 +12,7 @@ from datetime import UTC, datetime, timedelta
 import httpx
 import pytest
 from httpx import AsyncClient
-from sqlalchemy import text, update
+from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import storage
@@ -38,6 +38,7 @@ from tests.helpers import (
     api_user,
     auth_headers,
     channel_of,
+    generic_plan,
     put_media,
     seed_video,
 )
@@ -368,37 +369,11 @@ async def test_channel_videos_only_catalog_of_that_channel(
 # --- Индексы ------------------------------------------------------------------------------
 
 
-async def _generic_plan(db: AsyncSession, stmt) -> str:
-    """Generic plan запроса — так asyncpg выполняет prepared statement после нескольких
-    вызовов. Seq scan выключен: на маленькой таблице он дешевле индекса, а проверяем, что
-    индекс ПРИМЕНИМ к условию. PREPARE идёт простым протоколом (без параметров на проводе),
-    а force_generic_plan не даёт planner-у подставить значения из EXECUTE."""
-    conn = await db.connection()
-    compiled = stmt.compile(dialect=conn.dialect)
-    # SET LOCAL действует только внутри транзакции, а SQLAlchemy открывает её лениво —
-    # на первом запросе через свой адаптер, не через прямые вызовы драйвера.
-    await conn.execute(text("SELECT 1"))
-    raw = (await conn.get_raw_connection()).driver_connection
-    assert await raw.fetchval("SELECT now() = statement_timestamp()") is False, "нет транзакции"
-    await raw.execute("SET LOCAL enable_seqscan = off")
-    await raw.execute("SET LOCAL plan_cache_mode = force_generic_plan")
-    await raw.execute(f"PREPARE plan_probe AS {compiled}")
-    try:
-        # Значения — из самого запроса, нетипизированными литералами (типы задал PREPARE).
-        # NULL не годится: на NULL planner сворачивает условие в константу.
-        values = [compiled.params[name] for name in compiled.positiontup or []]
-        literals = ", ".join(f"'{v.isoformat() if isinstance(v, datetime) else v}'" for v in values)
-        rows = await raw.fetch(f"EXPLAIN EXECUTE plan_probe({literals})")
-    finally:
-        await raw.execute("DEALLOCATE plan_probe")
-    return "\n".join(r[0] for r in rows)
-
-
 @pytest.mark.parametrize("with_cursor", [False, True])
 async def test_feed_uses_partial_index(db: AsyncSession, with_cursor: bool) -> None:
     after = (datetime.now(UTC), uuid.uuid4()) if with_cursor else None
     stmt = videos_repo.catalog_page_stmt(policies.listed_filter(), after, 25)
-    plan = await _generic_plan(db, stmt)
+    plan = await generic_plan(db, stmt)
     assert "ix_videos_feed" in plan, plan
 
 
@@ -408,6 +383,6 @@ async def test_channel_videos_read_videos_by_index(db: AsyncSession) -> None:
     stmt = videos_repo.catalog_page_stmt(
         policies.listed_filter(), (datetime.now(UTC), uuid.uuid4()), 25, channel_id=uuid.uuid4()
     )
-    plan = await _generic_plan(db, stmt)
+    plan = await generic_plan(db, stmt)
     assert "Seq Scan on videos" not in plan, plan
     assert "ix_videos_channel_published" in plan or "ix_videos_feed" in plan, plan

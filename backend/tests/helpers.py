@@ -197,3 +197,32 @@ async def manage_matrix(
 
 def manage_expected(viewer_kind: str, state: str) -> int:
     return 401 if viewer_kind == "anon" else 403 if state in MANAGE_OPENS[viewer_kind] else 404
+
+
+# --- Планы запросов ------------------------------------------------------------------------
+
+
+async def generic_plan(db: AsyncSession, stmt) -> str:
+    """Generic plan запроса — так asyncpg выполняет prepared statement после нескольких
+    вызовов. Seq scan выключен: на маленькой таблице он дешевле индекса, а проверяем, что
+    индекс ПРИМЕНИМ к условию. PREPARE идёт простым протоколом (без параметров на проводе),
+    а force_generic_plan не даёт planner-у подставить значения из EXECUTE."""
+    conn = await db.connection()
+    compiled = stmt.compile(dialect=conn.dialect)
+    # SET LOCAL действует только внутри транзакции, а SQLAlchemy открывает её лениво —
+    # на первом запросе через свой адаптер, не через прямые вызовы драйвера.
+    await conn.execute(text("SELECT 1"))
+    raw = (await conn.get_raw_connection()).driver_connection
+    assert await raw.fetchval("SELECT now() = statement_timestamp()") is False, "нет транзакции"
+    await raw.execute("SET LOCAL enable_seqscan = off")
+    await raw.execute("SET LOCAL plan_cache_mode = force_generic_plan")
+    await raw.execute(f"PREPARE plan_probe AS {compiled}")
+    try:
+        # Значения — из самого запроса, нетипизированными литералами (типы задал PREPARE).
+        # NULL не годится: на NULL planner сворачивает условие в константу.
+        values = [compiled.params[name] for name in compiled.positiontup or []]
+        literals = ", ".join(f"'{v.isoformat() if isinstance(v, datetime) else v}'" for v in values)
+        rows = await raw.fetch(f"EXPLAIN EXECUTE plan_probe({literals})")
+    finally:
+        await raw.execute("DEALLOCATE plan_probe")
+    return "\n".join(r[0] for r in rows)
