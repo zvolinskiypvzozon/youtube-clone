@@ -8,12 +8,15 @@ from app.schemas.videos import (
     AccessEntryOut,
     AccessGrantIn,
     AccessListOut,
+    ReactionIn,
+    ReactionOut,
     VideoCardOut,
     VideoPage,
     VideoStreamOut,
     VideoUpdateIn,
 )
 from app.services import manage as manage_service
+from app.services import reactions as reactions_service
 from app.services import videos as videos_service
 
 # Ответы содержат подписанные ссылки и зависят от зрителя — не кэшируются.
@@ -134,3 +137,34 @@ async def revoke_access(
 )
 async def delete_video(video_id: uuid.UUID, user: CurrentUser, db: DbSession) -> None:
     await manage_service.delete_video(db, user, video_id)
+
+
+# Реакции: только тем, кто может видеть видео (can_view, иначе 404), и только готовому.
+_REACTION_ERRORS = {
+    401: err("Требуется вход"),
+    404: err("Видео не найдено или нет доступа"),
+    409: err("Видео ещё не обработано"),
+    503: err("Видео сейчас изменяется — повторить (Retry-After)"),
+}
+
+
+@router.put(
+    "/{video_id}/reaction",
+    response_model=ReactionOut,
+    summary="Поставить лайк или дизлайк (повтор той же реакции ничего не меняет)",
+    responses=_REACTION_ERRORS,
+)
+async def put_reaction(
+    video_id: uuid.UUID, data: ReactionIn, user: CurrentUser, db: DbSession
+) -> ReactionOut:
+    return await reactions_service.set_reaction(db, user, video_id, data.kind)
+
+
+@router.delete(
+    "/{video_id}/reaction",
+    response_model=ReactionOut,
+    summary="Снять свою реакцию (идемпотентно)",
+    responses=_REACTION_ERRORS,
+)
+async def delete_reaction(video_id: uuid.UUID, user: CurrentUser, db: DbSession) -> ReactionOut:
+    return await reactions_service.set_reaction(db, user, video_id, None)

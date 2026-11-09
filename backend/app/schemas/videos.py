@@ -4,7 +4,7 @@ from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
-from app.models import ModerationState, VideoStatus, VideoVisibility
+from app.models import ModerationState, ReactionKind, VideoStatus, VideoVisibility
 from app.schemas.uploads import Title
 
 
@@ -36,6 +36,9 @@ class VideoCardOut(BaseModel):
     comments_count: int
     published_at: datetime | None
     thumbnail_url: str | None
+    my_reaction: ReactionKind | None = Field(
+        default=None, description="Реакция текущего пользователя; null — нет или аноним"
+    )
     state: VideoStateOut | None = Field(
         description="Только владельцу и модераторам/админам; остальным — null"
     )
@@ -141,3 +144,15 @@ class AccessEntryOut(BaseModel):
 class AccessListOut(BaseModel):
     items: list[AccessEntryOut] = Field(description="Новые выдачи сверху")
     max_entries: int = Field(description="Лимит записей на одно видео")
+
+
+class ReactionIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: ReactionKind
+
+
+class ReactionOut(BaseModel):
+    my_reaction: ReactionKind | None
+    likes_count: int
+    dislikes_count: int

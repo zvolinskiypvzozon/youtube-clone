@@ -34,6 +34,11 @@ class VideoFileKind(StrEnum):
     thumbnail = "thumbnail"
 
 
+class ReactionKind(StrEnum):
+    like = "like"
+    dislike = "dislike"
+
+
 class JobType(StrEnum):
     process_video = "process_video"
 

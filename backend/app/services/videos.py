@@ -16,6 +16,7 @@ from app.core.config import get_settings
 from app.core.errors import Conflict, NotFound
 from app.models import Channel, User, Video, VideoFileKind, VideoStatus
 from app.repositories import channels as channels_repo
+from app.repositories import reactions as reactions_repo
 from app.repositories import videos as videos_repo
 from app.schemas.videos import (
     ChannelBrief,
@@ -99,6 +100,9 @@ async def card(db: AsyncSession, viewer: User | None, video_id: uuid.UUID) -> Vi
         comments_count=video.comments_count,
         published_at=video.published_at,
         thumbnail_url=thumbnail_url,
+        my_reaction=(
+            await reactions_repo.get_kind(db, video.id, viewer.id) if viewer is not None else None
+        ),
         state=state,
     )
 

@@ -5,6 +5,7 @@ from app.models.enums import (
     JobStatus,
     JobType,
     ModerationState,
+    ReactionKind,
     UserRole,
     VideoFileKind,
     VideoStatus,
@@ -12,7 +13,7 @@ from app.models.enums import (
 )
 from app.models.job import Job
 from app.models.user import Channel, User, UserSession
-from app.models.video import Video, VideoAccess, VideoFile
+from app.models.video import Reaction, Video, VideoAccess, VideoFile
 
 __all__ = [
     "Base",
@@ -21,6 +22,8 @@ __all__ = [
     "JobStatus",
     "JobType",
     "ModerationState",
+    "Reaction",
+    "ReactionKind",
     "User",
     "UserRole",
     "UserSession",

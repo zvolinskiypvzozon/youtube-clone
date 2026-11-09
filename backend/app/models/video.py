@@ -19,6 +19,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.models.base import Base, Timestamps, UUIDPk
 from app.models.enums import (
     ModerationState,
+    ReactionKind,
     VideoFileKind,
     VideoStatus,
     VideoVisibility,
@@ -162,5 +163,31 @@ class VideoAccess(Base):
         ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
     )
     granted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class Reaction(Base):
+    """Лайк или дизлайк пользователя к видео: одна строка на пару (видео, пользователь),
+    поэтому лайк и дизлайк взаимоисключающие. Счётчики videos.likes_count/dislikes_count
+    меняются в той же транзакции под блокировкой строки видео (services/reactions.py)."""
+
+    __tablename__ = "reactions"
+    # «Понравившиеся» (день 9: user_id, kind='like', новые сверху) и каскад при удалении
+    # пользователя (по user_id).
+    __table_args__ = (
+        Index("ix_reactions_user_kind_created", "user_id", "kind", text("created_at DESC")),
+    )
+
+    video_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("videos.id", ondelete="CASCADE"), primary_key=True
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    kind: Mapped[ReactionKind] = mapped_column(
+        pg_enum(ReactionKind, "reaction_kind"), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

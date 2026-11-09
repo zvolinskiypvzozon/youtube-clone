@@ -15,6 +15,7 @@ from sqlalchemy import (
     func,
     select,
     tuple_,
+    update,
 )
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -352,3 +353,22 @@ async def own_page(
 ) -> list[tuple[Video, tuple[str, str] | None]]:
     rows = (await db.execute(own_page_stmt(where, after, limit))).all()
     return [(video, (bucket, key) if key else None) for video, bucket, key in rows]
+
+
+async def add_reaction_counts(
+    db: AsyncSession, video_id: uuid.UUID, likes: int, dislikes: int
+) -> tuple[int, int]:
+    """Атомарно меняет счётчики реакций и возвращает новые значения."""
+    stmt = (
+        update(Video)
+        .where(Video.id == video_id)
+        .values(
+            likes_count=Video.likes_count + likes,
+            dislikes_count=Video.dislikes_count + dislikes,
+            # updated_at — время правки метаданных; иначе onupdate сдвигал бы его на каждый лайк.
+            updated_at=Video.updated_at,
+        )
+        .returning(Video.likes_count, Video.dislikes_count)
+    )
+    row = (await db.execute(stmt)).one()
+    return row.likes_count, row.dislikes_count
