@@ -1,10 +1,13 @@
 """Доменные ошибки. Сервисы не знают про HTTP — бросают эти исключения,
 а обработчики ниже превращают их в единый ответ {"detail": "<строка>"}."""
 
+from typing import ClassVar
+
 from fastapi import FastAPI, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from sqlalchemy.exc import DBAPIError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 # Встроенные ответы Starlette — по-русски, тем же форматом.
@@ -16,6 +19,7 @@ _HTTP_MESSAGES = {
 
 class AppError(Exception):
     status_code = 400
+    headers: ClassVar[dict[str, str] | None] = None
 
     def __init__(self, detail: str) -> None:
         super().__init__(detail)
@@ -42,11 +46,39 @@ class Conflict(AppError):
     status_code = 409
 
 
+RETRY_AFTER_SECONDS = 2
+# Глобальный текст: lock_timeout действует на все блокировки API (строки, advisory-локи смены
+# ролей), а не только на видео. Конкретные случаи задают свой текст через Busy(...).
+DB_BUSY = "Ресурс сейчас занят. Повторите попытку через несколько секунд"
+
+
+class Busy(AppError):
+    """Временная занятость (чужая блокировка строки): повторить позже."""
+
+    status_code = 503
+    headers: ClassVar[dict[str, str] | None] = {"Retry-After": str(RETRY_AFTER_SECONDS)}
+
+
+# SQLSTATE: lock_timeout истёк (lock_not_available) и взаимная блокировка (deadlock_detected).
+_BUSY_SQLSTATES = frozenset({"55P03", "40P01"})
+
+
+def _sqlstate(exc: DBAPIError) -> str | None:
+    orig = exc.orig
+    return getattr(orig, "sqlstate", None) or getattr(orig.__cause__, "sqlstate", None)
+
+
 def install_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(AppError)
     async def _app_error(_: Request, exc: AppError) -> JSONResponse:
-        headers = {"WWW-Authenticate": "Bearer"} if exc.status_code == 401 else None
+        headers = {"WWW-Authenticate": "Bearer"} if exc.status_code == 401 else exc.headers
         return JSONResponse({"detail": exc.detail}, status_code=exc.status_code, headers=headers)
+
+    @app.exception_handler(DBAPIError)
+    async def _db_error(_: Request, exc: DBAPIError) -> JSONResponse:
+        if _sqlstate(exc) in _BUSY_SQLSTATES:
+            return JSONResponse({"detail": DB_BUSY}, status_code=503, headers=Busy.headers)
+        raise exc  # прочие ошибки БД — 500, как раньше
 
     @app.exception_handler(RequestValidationError)
     async def _validation(_: Request, exc: RequestValidationError) -> JSONResponse:

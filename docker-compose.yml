@@ -118,7 +118,9 @@ services:
     build: { <<: *backend-build, target: worker }
     image: youtube-clone/worker:local
     restart: unless-stopped
-    environment: *backend-env
+    environment:
+      <<: *backend-env
+      DB_LOCK_TIMEOUT_MS: "30000"  # API — 5 с (по умолчанию), см. config.py
     mem_limit: 2g
     pids_limit: 256
     cap_drop: [ALL]

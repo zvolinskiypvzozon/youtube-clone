@@ -52,6 +52,12 @@ class Settings(BaseSettings):
 
     health_timeout_seconds: float = 2.0
 
+    # Сколько запрос ждёт чужую блокировку строки, мс (SET lock_timeout на соединение).
+    # API — коротко: занятое видео → 503 + Retry-After, а не висящий запрос и занятое
+    # соединение пула. Worker — 30 с (compose): ожидание там нормально, а таймаут уходит
+    # в обычный повтор задачи.
+    db_lock_timeout_ms: int = 5000
+
     # Сессии (ADR 0005)
     session_ttl_days: int = 30
     # Secure-флаг cookie: включать при HTTPS. По ТЗ проверка идёт по HTTP на IP,

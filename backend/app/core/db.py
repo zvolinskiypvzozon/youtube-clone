@@ -19,7 +19,10 @@ def get_engine() -> AsyncEngine:
         pool_pre_ping=True,
         pool_size=10,
         max_overflow=10,
-        connect_args={"timeout": 5},
+        connect_args={
+            "timeout": 5,
+            "server_settings": {"lock_timeout": str(settings.db_lock_timeout_ms)},
+        },
     )
 
 
