@@ -145,3 +145,9 @@ def owned_filter(viewer: User) -> ColumnElement[bool]:
     один раз (InitPlan) и читает ix_videos_channel_created в порядке выдачи."""
     own_channel = select(Channel.id).where(Channel.owner_id == viewer.id).scalar_subquery()
     return Video.channel_id == own_channel
+
+
+def interactable_filter() -> ColumnElement[bool]:
+    """SQL-аналог can_interact: готово и не скрыто модератором. Для атомарных записей
+    (счётчик просмотров), где условие проверяется в самом UPDATE."""
+    return and_(Video.status == _READY, Video.moderation == _MOD_OK)

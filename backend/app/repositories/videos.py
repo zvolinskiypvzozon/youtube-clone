@@ -372,3 +372,15 @@ async def add_reaction_counts(
     )
     row = (await db.execute(stmt)).one()
     return row.likes_count, row.dislikes_count
+
+
+async def add_view(db: AsyncSession, video_id: uuid.UUID, where: ColumnElement[bool]) -> None:
+    """+1 просмотр атомарно. Условие `where` — из policies (права зрителя и «можно
+    взаимодействовать»): оно проверяется в самом UPDATE, в том числе заново по новой версии
+    строки, если UPDATE ждал блокировку (например, PATCH делал видео приватным)."""
+    stmt = (
+        update(Video)
+        .where(Video.id == video_id, where)
+        .values(views_count=Video.views_count + 1, updated_at=Video.updated_at)
+    )
+    await db.execute(stmt)

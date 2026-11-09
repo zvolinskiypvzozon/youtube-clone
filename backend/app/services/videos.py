@@ -9,6 +9,7 @@ import asyncio
 import uuid
 from dataclasses import dataclass
 
+from sqlalchemy import and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import storage
@@ -241,3 +242,18 @@ async def my_videos(
     last = rows[-1][0] if rows else None
     next_cursor = cursor.encode(last.created_at, last.id) if has_more and last else None
     return MyVideoPage(items=items, next_cursor=next_cursor)
+
+
+async def add_view(db: AsyncSession, viewer: User | None, video_id: uuid.UUID) -> None:
+    """Просмотр: плеер (фронтенд, день 7) шлёт один запрос после 5 с воспроизведения.
+    Доступ — can_view (иначе 404), не готово — 409. Засчитывается, только если в момент
+    записи зритель всё ещё может видеть видео и с ним можно взаимодействовать
+    (visible_filter + interactable_filter в самом UPDATE, ADR 0006 доп. 4): просмотр скрытого
+    владельцем или staff — разбор, не просмотр (204 без счёта). Дедупликации нет —
+    упрощение дня 5, накрутку ограничит rate limit дня 6."""
+    viewable = await get_viewable(db, viewer, video_id)
+    if viewable.video.status != VideoStatus.ready:
+        raise Conflict(NOT_READY)
+    where = and_(policies.visible_filter(viewer), policies.interactable_filter())
+    await videos_repo.add_view(db, video_id, where)
+    await db.commit()

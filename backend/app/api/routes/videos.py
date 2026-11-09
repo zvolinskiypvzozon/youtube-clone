@@ -168,3 +168,14 @@ async def put_reaction(
 )
 async def delete_reaction(video_id: uuid.UUID, user: CurrentUser, db: DbSession) -> ReactionOut:
     return await reactions_service.set_reaction(db, user, video_id, None)
+
+
+@router.post(
+    "/{video_id}/view",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Засчитать просмотр (плеер — после нескольких секунд воспроизведения)",
+    description="Без дедупликации. Скрытое модератором видео не засчитывается (204).",
+    responses={404: err("Видео не найдено или нет доступа"), 409: err("Видео ещё не обработано")},
+)
+async def add_view(video_id: uuid.UUID, viewer: OptionalUser, db: DbSession) -> None:
+    await videos_service.add_view(db, viewer, video_id)
