@@ -12,16 +12,20 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_sessionmaker
-from app.models import Reaction, ReactionKind, User, Video
+from app.models import Reaction, ReactionKind, User, UserRole, Video
+from app.repositories import videos as videos_repo
 from app.schemas.videos import VideoUpdateIn
 from app.services import manage as manage_service
 from app.services import reactions as reactions_service
+from app.services import videos as videos_service
 from tests.helpers import (
+    HIDDEN,
     MANAGE_OPENS,
     MANAGE_STATES,
     MANAGE_VIEWERS,
     PRIV,
     PUB,
+    READY,
     api_user,
     auth_headers,
     backend_pid,
@@ -31,7 +35,8 @@ from tests.helpers import (
     wait_for_lock_waiters,
 )
 
-NOT_READY_STATES = {"processing", "failed"}
+# Видят, но взаимодействовать нельзя (policies.can_interact): не готово или скрыто модератором.
+NOT_INTERACTIVE_STATES = {"processing", "failed", "hidden"}
 
 
 def _url(video_id: uuid.UUID) -> str:
@@ -164,7 +169,7 @@ async def test_reaction_access_matrix(
             expected = 401
         elif name not in opens:
             expected = 404  # как несуществующее: факт существования не раскрывается
-        elif name in NOT_READY_STATES:
+        elif name in NOT_INTERACTIVE_STATES:
             expected = 409
         else:
             expected = 200
@@ -319,3 +324,37 @@ async def test_reaction_on_video_deleted_while_waiting(
         return await manage_service.delete_video(session, me, video.id)
 
     assert await _reaction_waits_for(client, db, delete, user, video.id) == 404
+
+
+@pytest.mark.parametrize("role", [None, UserRole.moderator, UserRole.admin])
+async def test_hidden_video_rejects_reactions_even_for_owner_and_staff(
+    client: AsyncClient, db: AsyncSession, role: UserRole | None
+) -> None:
+    """Реакции — публичное голосование: на скрытом модератором видео их не ставит никто,
+    включая владельца и staff (решение архитектора 2026-11-09). Понятная причина — 409."""
+    owner = await api_user(client, db)
+    video = await seed_video(db, await channel_of(db, owner), PUB, READY, HIDDEN)
+    actor = owner if role is None else await api_user(client, db, role)
+    r = await client.put(_url(video.id), json={"kind": "like"}, headers=actor["auth"])
+    assert r.status_code == 409, r.text
+    assert r.json()["detail"] == videos_service.HIDDEN_NO_INTERACTION
+    assert await _counts(db, video.id) == (0, 0)
+
+
+async def test_reaction_rejected_if_hidden_while_waiting(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    """Модератор скрывает видео (строка заблокирована, commit придержан), владелец в это время
+    ставит лайк: под блокировкой видео уже скрыто — 409, лайка нет. Сторона модерации здесь —
+    прямое изменение строки (эндпоинт модерации появится на дне 6)."""
+    owner = await api_user(client, db)
+    video = await seed_video(db, await channel_of(db, owner), PUB)
+
+    async def hide(session: AsyncSession) -> None:
+        locked = await videos_repo.lock_video(session, video.id)
+        assert locked is not None
+        locked.moderation = HIDDEN
+        await session.commit()
+
+    assert await _reaction_waits_for(client, db, hide, owner, video.id) == 409
+    assert await _counts(db, video.id) == (0, 0)

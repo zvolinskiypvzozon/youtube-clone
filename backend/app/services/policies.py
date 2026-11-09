@@ -78,6 +78,14 @@ def can_view(viewer: User | None, facts: VideoFacts) -> bool:
     return viewer is not None and facts.viewer_has_access
 
 
+def can_interact(video: Video) -> bool:
+    """Реакции и новые комментарии — публичное взаимодействие: только с готовым и не скрытым
+    модератором видео, для любого зрителя, включая владельца и staff (решение архитектора
+    2026-11-09, день 5). Доступ staff к скрытому — для разбора, а не для голосования.
+    Проверяется после can_view: кто не может видеть видео, получает 404 раньше."""
+    return video.status == VideoStatus.ready and video.moderation == ModerationState.ok
+
+
 def sees_internal_state(viewer: User | None, owner_id: uuid.UUID) -> bool:
     """Статус обработки, видимость, пометка модерации и причина отказа: владельцу и staff.
     Остальные получают только публичную карточку."""

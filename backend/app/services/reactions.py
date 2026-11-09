@@ -2,7 +2,8 @@
 
 Одна строка `reactions` на пару (видео, пользователь) — лайк и дизлайк взаимоисключающие;
 повтор той же реакции ничего не меняет (идемпотентно). Доступ — `can_view` (ADR 0006:
-реакции доступны только тем, кто может видеть видео), реагировать можно только на готовое.
+реакции доступны только тем, кто может видеть видео), и только к готовому и не скрытому
+модератором видео — для всех, включая владельца и staff (`policies.can_interact`).
 
 Счётчики сходятся: все изменения реакций одного видео сериализуются блокировкой строки
 видео (`FOR NO KEY UPDATE`, после проверки прав), прежняя реакция читается уже под ней,
@@ -14,15 +15,15 @@ import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.errors import Conflict, NotFound
-from app.models import ReactionKind, User, Video, VideoStatus
+from app.core.errors import NotFound
+from app.models import ReactionKind, User, Video
 from app.repositories import access as access_repo
 from app.repositories import reactions as reactions_repo
 from app.repositories import videos as videos_repo
 from app.schemas.videos import ReactionOut
 from app.services import policies
 from app.services import videos as videos_service
-from app.services.videos import NOT_READY, VIDEO_NOT_FOUND, Viewable
+from app.services.videos import VIDEO_NOT_FOUND, Viewable
 
 
 def _count(kind: ReactionKind | None, of: ReactionKind) -> int:
@@ -34,8 +35,7 @@ async def set_reaction(
 ) -> ReactionOut:
     """kind=None — снять реакцию."""
     viewable = await videos_service.get_viewable(db, viewer, video_id)  # can_view, иначе 404
-    if viewable.video.status != VideoStatus.ready:
-        raise Conflict(NOT_READY)
+    videos_service.ensure_interactive(viewable.video)  # готово и не скрыто, иначе 409
     # Повтор той же реакции — ответ без блокировки строки видео (самый дешёвый спам-вектор
     # не должен занимать строку, нужную правке, worker-у и удалению; аудит).
     if await reactions_repo.get_kind(db, video_id, viewer.id) == kind:
@@ -85,7 +85,9 @@ async def _lock_viewable(db: AsyncSession, viewer: User, viewable: Viewable) -> 
     if not policies.can_view(viewer, facts):
         await db.rollback()
         raise NotFound(VIDEO_NOT_FOUND)
-    if video.status != VideoStatus.ready:
-        await db.rollback()
-        raise Conflict(NOT_READY)
+    if not policies.can_interact(video):  # стало скрытым или не готовым, пока ждали
+        try:
+            videos_service.ensure_interactive(video)  # причина — до rollback (он гасит объекты)
+        finally:
+            await db.rollback()
     return video

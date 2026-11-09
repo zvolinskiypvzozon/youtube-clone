@@ -36,6 +36,14 @@ from app.services import cursor, policies
 VIDEO_NOT_FOUND = "Видео не найдено"
 CHANNEL_NOT_FOUND = "Канал не найден"
 NOT_READY = "Видео ещё не обработано"
+HIDDEN_NO_INTERACTION = "Видео скрыто модератором: реакции и комментарии недоступны"
+
+
+def ensure_interactive(video: Video) -> None:
+    """policies.can_interact с понятной причиной отказа (409) для тех, кто видео видит."""
+    if not policies.can_interact(video):
+        raise Conflict(NOT_READY if video.status != VideoStatus.ready else HIDDEN_NO_INTERACTION)
+
 
 # Качества потока, лучшее первым.
 QUALITIES = {VideoFileKind.mp4_720: "720p", VideoFileKind.mp4_360: "360p"}
