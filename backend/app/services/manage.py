@@ -1,4 +1,4 @@
-"""Управление своими видео: правка метаданных и видимости, список допуска (дальше — удаление).
+"""Управление своими видео: правка метаданных и видимости, список допуска, удаление.
 
 Права — через policies (ADR 0006): управлять может только владелец (`can_manage`).
 Ответ на отказ:
@@ -18,7 +18,7 @@ from app.repositories import access as access_repo
 from app.repositories import users as users_repo
 from app.repositories import videos as videos_repo
 from app.schemas.videos import AccessEntryOut, AccessListOut, VideoCardOut, VideoUpdateIn
-from app.services import policies
+from app.services import deletion, policies
 from app.services import videos as videos_service
 from app.services.publication import publish_if_due
 from app.services.videos import VIDEO_NOT_FOUND, Viewable
@@ -120,3 +120,12 @@ async def revoke_access(
     await check_manageable(db, viewer, video_id)
     await access_repo.remove(db, video_id, user_id)
     await db.commit()
+
+
+# --- Удаление -------------------------------------------------------------------------------
+
+
+async def delete_video(db: AsyncSession, viewer: User, video_id: uuid.UUID) -> None:
+    """Права — до любых блокировок (чужой DELETE не встаёт в очередь на строки)."""
+    await check_manageable(db, viewer, video_id)
+    await deletion.delete_video(db, video_id)

@@ -121,3 +121,16 @@ async def revoke_access(
     video_id: uuid.UUID, user_id: uuid.UUID, user: CurrentUser, db: DbSession
 ) -> None:
     await manage_service.revoke_access(db, user, video_id, user_id)
+
+
+@router.delete(
+    "/{video_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Удалить своё видео (в любом статусе) вместе с файлами",
+    responses={
+        **_MANAGE_ERRORS,
+        503: err("Видео сейчас обрабатывается или изменяется — повторить (Retry-After)"),
+    },
+)
+async def delete_video(video_id: uuid.UUID, user: CurrentUser, db: DbSession) -> None:
+    await manage_service.delete_video(db, user, video_id)

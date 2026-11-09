@@ -206,3 +206,14 @@ def list_objects(bucket: str, prefix: str) -> list[tuple[str, datetime]]:
     for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
         result.extend((o["Key"], o["LastModified"]) for o in page.get("Contents", []))
     return result
+
+
+def list_multipart_uploads(bucket: str, key: str | None = None) -> list[tuple[str, str, datetime]]:
+    """(ключ, upload_id, время начала) незавершённых multipart-загрузок: всех в бакете или
+    одного ключа. Префикс-«каталог» не поддерживается: silo (как MinIO) по Prefix="raw/"
+    возвращает пустой список, а без префикса или по точному ключу — корректный (проверено)."""
+    paginator = get_s3().get_paginator("list_multipart_uploads")
+    result: list[tuple[str, str, datetime]] = []
+    for page in paginator.paginate(Bucket=bucket, **({"Prefix": key} if key else {})):
+        result.extend((u["Key"], u["UploadId"], u["Initiated"]) for u in page.get("Uploads", []))
+    return result

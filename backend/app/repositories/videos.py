@@ -3,9 +3,12 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from sqlalchemy import (
+    ARRAY,
     ColumnElement,
     Select,
     and_,
+    any_,
+    cast,
     delete,
     exists,
     false,
@@ -13,6 +16,7 @@ from sqlalchemy import (
     select,
     tuple_,
 )
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -174,7 +178,51 @@ async def lock_for_edit(db: AsyncSession, video_id: uuid.UUID) -> Video | None:
 
 
 async def lock_video(db: AsyncSession, video_id: uuid.UUID) -> Video | None:
-    return await db.scalar(select(Video).where(Video.id == video_id).with_for_update())
+    """FOR UPDATE. populate_existing: если строка уже была прочитана в эту сессию (проверка
+    прав при удалении), она перечитывается после блокировки."""
+    stmt = (
+        select(Video)
+        .where(Video.id == video_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    return await db.scalar(stmt)
+
+
+# --- Удаление видео (порядок блокировок — services/deletion.py) ---------------------------
+
+
+async def lock_jobs_of(db: AsyncSession, video_id: uuid.UUID) -> set[uuid.UUID]:
+    """Блокирует задачи видео (FOR UPDATE) — до блокировки самого видео, как у worker-а."""
+    # ORDER BY: при нескольких задачах блокировки берутся в одном порядке у всех.
+    stmt = select(Job.id).where(Job.video_id == video_id).order_by(Job.id).with_for_update()
+    return set(await db.scalars(stmt))
+
+
+async def job_ids_of(db: AsyncSession, video_id: uuid.UUID) -> set[uuid.UUID]:
+    """Задачи видео без блокировки: проверка, не появилась ли новая (complete_upload)."""
+    return set(await db.scalars(select(Job.id).where(Job.video_id == video_id)))
+
+
+async def file_keys(db: AsyncSession, video_id: uuid.UUID) -> list[tuple[str, str]]:
+    stmt = select(VideoFile.bucket, VideoFile.s3_key).where(VideoFile.video_id == video_id)
+    return [(row.bucket, row.s3_key) for row in (await db.execute(stmt)).all()]
+
+
+async def delete_video(db: AsyncSession, video_id: uuid.UUID) -> None:
+    """Каскадом удаляются video_files, video_access, jobs (ON DELETE CASCADE)."""
+    await db.execute(delete(Video).where(Video.id == video_id))
+
+
+async def statuses_of(db: AsyncSession, video_ids: list[uuid.UUID]) -> dict[uuid.UUID, VideoStatus]:
+    """Статусы существующих видео. Один параметр-массив (= ANY), а не IN с параметром
+    на каждый id: у asyncpg предел 32767 параметров в запросе."""
+    if not video_ids:
+        return {}
+    stmt = select(Video.id, Video.status).where(
+        Video.id == any_(cast(video_ids, ARRAY(PG_UUID(as_uuid=True))))
+    )
+    return {row.id: row.status for row in (await db.execute(stmt)).all()}
 
 
 async def delete_stale_uploads(
