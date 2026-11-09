@@ -1,7 +1,8 @@
 import uuid
 from datetime import datetime
+from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 from app.models import ModerationState, VideoStatus, VideoVisibility
 from app.schemas.uploads import Title
@@ -98,3 +99,27 @@ class VideoUpdateIn(BaseModel):
         if nulls:
             raise ValueError(f"Поля не могут быть null: {', '.join(nulls)}")
         return self
+
+
+class AccessGrantIn(BaseModel):
+    """Кому открыть видео: по нику (ники публичны; поиск по email раскрывал бы,
+    какие адреса зарегистрированы)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    # Формат — как CHECK username_format: заведомо невозможный ник (пробелы, NUL, кириллица)
+    # отсекается до БД (NUL в text Postgres не принимает — было бы 500, аудит 3b).
+    username: Annotated[
+        str, StringConstraints(strip_whitespace=True, pattern=r"^[A-Za-z0-9_]{3,30}$")
+    ] = Field(examples=["alice_42"])
+
+
+class AccessEntryOut(BaseModel):
+    user_id: uuid.UUID
+    username: str
+    granted_at: datetime
+
+
+class AccessListOut(BaseModel):
+    items: list[AccessEntryOut] = Field(description="Новые выдачи сверху")
+    max_entries: int = Field(description="Лимит записей на одно видео")

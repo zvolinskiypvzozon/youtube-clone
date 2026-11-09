@@ -1,10 +1,18 @@
 import uuid
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response, status
 
 from app.api.deps import CurrentUser, Cursor, DbSession, Limit, OptionalUser, no_store
 from app.schemas.common import err
-from app.schemas.videos import VideoCardOut, VideoPage, VideoStreamOut, VideoUpdateIn
+from app.schemas.videos import (
+    AccessEntryOut,
+    AccessGrantIn,
+    AccessListOut,
+    VideoCardOut,
+    VideoPage,
+    VideoStreamOut,
+    VideoUpdateIn,
+)
 from app.services import manage as manage_service
 from app.services import videos as videos_service
 
@@ -59,3 +67,57 @@ async def update_video(
     video_id: uuid.UUID, data: VideoUpdateIn, user: CurrentUser, db: DbSession
 ) -> VideoCardOut:
     return await manage_service.update_video(db, user, video_id, data)
+
+
+# Список допуска: права как у правки (ADR 0006, доп. 2) — не может открыть → 404,
+# может открыть, но не владелец → 403, аноним → 401.
+_MANAGE_ERRORS = {
+    401: err("Требуется вход"),
+    403: err("Видео доступно, но управлять им может только владелец"),
+    404: err("Видео не найдено или нет доступа"),
+}
+
+
+@router.get(
+    "/{video_id}/access",
+    response_model=AccessListOut,
+    summary="Список допуска к своему видео",
+    responses=_MANAGE_ERRORS,
+)
+async def list_access(video_id: uuid.UUID, user: CurrentUser, db: DbSession) -> AccessListOut:
+    return await manage_service.list_access(db, user, video_id)
+
+
+@router.post(
+    "/{video_id}/access",
+    response_model=AccessEntryOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Открыть своё приватное видео пользователю (по нику)",
+    description="201 — допуск выдан, 200 — уже был. Действует, пока видео приватное.",
+    responses={
+        200: {"model": AccessEntryOut, "description": "Допуск уже был"},
+        400: err("Допуск себе не выдаётся: владелец и так видит своё видео"),
+        **_MANAGE_ERRORS,
+        404: err("Видео или пользователь не найдены"),
+        409: err("Достигнут лимит списка допуска"),
+    },
+)
+async def grant_access(
+    video_id: uuid.UUID, data: AccessGrantIn, user: CurrentUser, db: DbSession, response: Response
+) -> AccessEntryOut:
+    entry, created = await manage_service.grant_access(db, user, video_id, data.username)
+    if not created:
+        response.status_code = status.HTTP_200_OK
+    return entry
+
+
+@router.delete(
+    "/{video_id}/access/{user_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Отозвать допуск (идемпотентно: записи нет — тоже 204)",
+    responses=_MANAGE_ERRORS,
+)
+async def revoke_access(
+    video_id: uuid.UUID, user_id: uuid.UUID, user: CurrentUser, db: DbSession
+) -> None:
+    await manage_service.revoke_access(db, user, video_id, user_id)

@@ -73,3 +73,8 @@ async def count_admins(db: AsyncSession) -> int:
         await db.scalar(select(func.count()).select_from(User).where(User.role == UserRole.admin))
         or 0
     )
+
+
+async def get_by_username(db: AsyncSession, username: str) -> User | None:
+    """citext — без учёта регистра."""
+    return await db.scalar(select(User).where(User.username == username))
