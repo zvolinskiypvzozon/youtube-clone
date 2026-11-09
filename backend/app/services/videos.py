@@ -20,6 +20,8 @@ from app.repositories import videos as videos_repo
 from app.schemas.videos import (
     ChannelBrief,
     ChannelOut,
+    MyVideoItem,
+    MyVideoPage,
     VideoCardOut,
     VideoListItem,
     VideoPage,
@@ -194,3 +196,36 @@ async def channel_videos(
     if channel is None:
         raise NotFound(CHANNEL_NOT_FOUND)
     return await _catalog(db, after_cursor, limit, channel_id=channel.id)
+
+
+async def my_videos(
+    db: AsyncSession, viewer: User, after_cursor: str | None, limit: int
+) -> MyVideoPage:
+    """«Мои видео»: свои видео в любом статусе (policies.owned_filter), новые сверху."""
+    after = cursor.decode(after_cursor) if after_cursor else None
+    rows = await videos_repo.own_page(db, policies.owned_filter(viewer), after, limit + 1)
+    has_more = len(rows) > limit
+    rows = rows[:limit]
+    signed = iter(await _sign([thumb for _, thumb in rows if thumb is not None]))
+    items = [
+        MyVideoItem(
+            id=video.id,
+            title=video.title,
+            duration_seconds=video.duration_seconds,
+            views_count=video.views_count,
+            created_at=video.created_at,
+            published_at=video.published_at,
+            thumbnail_url=next(signed) if thumb is not None else None,
+            state=VideoStateOut(
+                status=video.status,
+                visibility=video.visibility,
+                moderation=video.moderation,
+                moderation_reason=video.moderation_reason,
+                failure_reason=video.failure_reason,
+            ),
+        )
+        for video, thumb in rows
+    ]
+    last = rows[-1][0] if rows else None
+    next_cursor = cursor.encode(last.created_at, last.id) if has_more and last else None
+    return MyVideoPage(items=items, next_cursor=next_cursor)

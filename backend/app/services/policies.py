@@ -11,7 +11,8 @@
     не скрытые видео, одинаково для любого зрителя (владелец и модераторы видят остальное
     в «Моих видео» и в модерации, а не в каталоге).
 
-Плюс `can_manage(viewer, owner_id)` — правка, допуск, удаление: только владелец.
+Плюс `can_manage(viewer, owner_id)` — правка, допуск, удаление: только владелец, и
+`owned_filter(viewer)` — его SQL-аналог для «Моих видео» (все свои видео в любом статусе).
 
 Кто видит одно видео (`can_view`):
   - владелец, модератор, админ — всегда (скрытое и необработанное тоже);
@@ -126,3 +127,13 @@ def visible_filter(viewer: User | None) -> ColumnElement[bool]:
     owned = Video.channel_id.in_(select(Channel.id).where(Channel.owner_id == viewer.id))
     granted = exists().where(VideoAccess.video_id == Video.id, VideoAccess.user_id == viewer.id)
     return or_(owned, and_(available, or_(not_private, granted)))
+
+
+def owned_filter(viewer: User) -> ColumnElement[bool]:
+    """«Мои видео»: видео канала зрителя в любом статусе, видимости и модерации — SQL-аналог
+    can_manage. Только свой канал и для staff: чужие видео модераторы видят в модерации.
+
+    Равенство со скалярным подзапросом (канал у пользователя один): planner вычисляет его
+    один раз (InitPlan) и читает ix_videos_channel_created в порядке выдачи."""
+    own_channel = select(Channel.id).where(Channel.owner_id == viewer.id).scalar_subquery()
+    return Video.channel_id == own_channel

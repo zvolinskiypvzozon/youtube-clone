@@ -63,6 +63,13 @@ class Video(UUIDPk, Timestamps, Base):
             text("published_at DESC"),
             text("id DESC"),
         ),
+        # «Мои видео»: все видео канала в любом статусе, новые загрузки сверху.
+        Index(
+            "ix_videos_channel_created",
+            "channel_id",
+            text("created_at DESC"),
+            text("id DESC"),
+        ),
         # Поиск по названию: триграммы (подстрока, без учёта регистра, опечатки).
         Index(
             "ix_videos_title_trgm",

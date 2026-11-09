@@ -324,3 +324,31 @@ async def catalog_page(
         CatalogRow(video, channel, (bucket, key) if key else None)
         for video, channel, bucket, key in rows
     ]
+
+
+def own_page_stmt(
+    where: ColumnElement[bool], after: tuple[datetime, uuid.UUID] | None, limit: int
+) -> Select:
+    """«Мои видео»: новые загрузки сверху, keyset по (created_at, id). Условие `where` —
+    из policies (owned_filter); индекс ix_videos_channel_created."""
+    thumb = aliased(VideoFile)
+    stmt = (
+        select(Video, thumb.bucket, thumb.s3_key)
+        .outerjoin(thumb, and_(thumb.video_id == Video.id, thumb.kind == VideoFileKind.thumbnail))
+        .where(where)
+        .order_by(Video.created_at.desc(), Video.id.desc())
+        .limit(limit)
+    )
+    if after is not None:
+        stmt = stmt.where(tuple_(Video.created_at, Video.id) < tuple_(*after))
+    return stmt
+
+
+async def own_page(
+    db: AsyncSession,
+    where: ColumnElement[bool],
+    after: tuple[datetime, uuid.UUID] | None,
+    limit: int,
+) -> list[tuple[Video, tuple[str, str] | None]]:
+    rows = (await db.execute(own_page_stmt(where, after, limit))).all()
+    return [(video, (bucket, key) if key else None) for video, bucket, key in rows]

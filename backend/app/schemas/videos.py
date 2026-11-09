@@ -73,6 +73,24 @@ class VideoPage(BaseModel):
     next_cursor: str | None = Field(description="null — это последняя страница")
 
 
+class MyVideoItem(BaseModel):
+    """Своё видео в «Моих видео»: с служебным состоянием, в любом статусе."""
+
+    id: uuid.UUID
+    title: str
+    duration_seconds: int | None
+    views_count: int
+    created_at: datetime
+    published_at: datetime | None = Field(description="null — ещё не публиковалось")
+    thumbnail_url: str | None
+    state: VideoStateOut
+
+
+class MyVideoPage(BaseModel):
+    items: list[MyVideoItem]
+    next_cursor: str | None = Field(description="null — это последняя страница")
+
+
 class ChannelOut(BaseModel):
     id: uuid.UUID
     handle: str
