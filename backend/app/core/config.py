@@ -57,6 +57,11 @@ class Settings(BaseSettings):
     # соединение пула. Worker — 30 с (compose): ожидание там нормально, а таймаут уходит
     # в обычный повтор задачи.
     db_lock_timeout_ms: int = 5000
+    # Предел одного SQL-запроса, мс (SET statement_timeout на соединение; 0 — без предела).
+    # API — 5 с: тяжёлый запрос → 503 + Retry-After, а не занятое соединение пула (решение
+    # архитектора 2026-11-10). Worker — 0 (compose): его запросы короткие, а ffmpeg идёт вне
+    # БД. Alembic создаёт свой движок (alembic/env.py) и этих настроек не получает.
+    db_statement_timeout_ms: int = 5000
 
     # Сессии (ADR 0005)
     session_ttl_days: int = 30

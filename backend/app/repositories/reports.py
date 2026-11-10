@@ -2,7 +2,7 @@
 
 import uuid
 
-from sqlalchemy import ColumnElement, exists, select, text
+from sqlalchemy import ColumnElement, exists, func, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -71,3 +71,19 @@ async def create_open(
         .returning(Report)
     )
     return (await db.execute(stmt)).scalar_one_or_none()
+
+
+async def count_open_by(db: AsyncSession, reporter_id: uuid.UUID) -> int:
+    """Открытые жалобы пользователя на существующие видео (потолок; частичный индекс
+    ix_reports_reporter_open). Жалоба на удалённое видео (video_id NULL) остаётся открытой до
+    решения staff, но место в потолке не занимает (ревью и аудит шага 2)."""
+    stmt = (
+        select(func.count())
+        .select_from(Report)
+        .where(
+            Report.reporter_id == reporter_id,
+            Report.status == ReportStatus.open,
+            Report.video_id.is_not(None),
+        )
+    )
+    return await db.scalar(stmt) or 0

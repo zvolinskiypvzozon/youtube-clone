@@ -39,6 +39,13 @@ class Report(UUIDPk, CreatedAt, Base):
         Index("ix_reports_video", "video_id"),
         # SET NULL при удалении пользователя (день 9).
         Index("ix_reports_reporter", "reporter_id"),
+        # Потолок открытых жалоб пользователя (шаг 2 дня 6): подсчёт читает не больше 20 строк,
+        # а не всю историю жалоб (ревью шага 2).
+        Index(
+            "ix_reports_reporter_open",
+            "reporter_id",
+            postgresql_where=text("status = 'open'"),
+        ),
     )
 
     video_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("videos.id", ondelete="SET NULL"))

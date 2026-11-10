@@ -59,8 +59,9 @@ class Busy(AppError):
     headers: ClassVar[dict[str, str] | None] = {"Retry-After": str(RETRY_AFTER_SECONDS)}
 
 
-# SQLSTATE: lock_timeout истёк (lock_not_available) и взаимная блокировка (deadlock_detected).
-_BUSY_SQLSTATES = frozenset({"55P03", "40P01"})
+# SQLSTATE: lock_timeout истёк (lock_not_available), взаимная блокировка (deadlock_detected)
+# и statement_timeout истёк (query_canceled) — временная перегрузка, повторить позже.
+_BUSY_SQLSTATES = frozenset({"55P03", "40P01", "57014"})
 
 
 def _sqlstate(exc: DBAPIError) -> str | None:

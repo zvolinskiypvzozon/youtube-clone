@@ -2,7 +2,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, Query
 
-from app.api.deps import CurrentUser, Cursor, DbSession, Limit, no_store
+from app.api.deps import CurrentUser, Cursor, DbSession, Limit, PlaylistLimit, no_store
 from app.schemas.common import err
 from app.schemas.playlists import PlaylistPage
 from app.schemas.videos import MySubscriptionPage, MyVideoPage
@@ -50,7 +50,7 @@ async def my_playlists(
     user: CurrentUser,
     db: DbSession,
     cursor: Cursor = None,
-    limit: Limit = 24,
+    limit: PlaylistLimit = 20,
     video_id: uuid.UUID | None = Query(default=None, description="Отметить плейлисты с этим видео"),
 ) -> PlaylistPage:
     return await playlists_service.my_playlists(db, user, cursor, limit, video_id)

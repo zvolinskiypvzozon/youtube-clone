@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import exists, func, select
+from sqlalchemy import exists, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -119,3 +119,21 @@ async def lock_for_ban(db: AsyncSession, user_id: uuid.UUID) -> User | None:
         .execution_options(populate_existing=True)
     )
     return await db.scalar(stmt)
+
+
+async def set_local_statement_timeout(db: AsyncSession, ms: int) -> None:
+    """statement_timeout до конца текущей транзакции (SET LOCAL; транзакция начинается этим
+    запросом). Значение — целое из кода, не ввод пользователя."""
+    await db.execute(text(f"SET LOCAL statement_timeout = {int(ms)}"))
+
+
+async def lock_self_exclusive(db: AsyncSession, user_id: uuid.UUID) -> bool:
+    """Своя строка FOR NO KEY UPDATE, если пользователь не забанен: сериализует проверки
+    потолков «на пользователя» (открытые жалобы) между его параллельными запросами. Берётся до
+    строки видео — порядок «пользователь → видео», как у бана (ADR 0006 доп. 8)."""
+    stmt = (
+        select(User.id)
+        .where(User.id == user_id, User.is_banned.is_(False))
+        .with_for_update(key_share=True)
+    )
+    return await db.scalar(stmt) is not None

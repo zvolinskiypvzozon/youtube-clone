@@ -9,16 +9,22 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from sqlalchemy import (
+    ARRAY,
     ColumnElement,
+    Select,
     and_,
+    any_,
+    cast,
     delete,
     exists,
     func,
     literal,
     select,
+    true,
     tuple_,
     update,
 )
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
@@ -217,24 +223,43 @@ async def summaries(
     counts_stmt = (
         select(PlaylistItem.playlist_id, func.count())
         .join(Video, Video.id == PlaylistItem.video_id)
-        .where(PlaylistItem.playlist_id.in_(playlist_ids), visible)
+        .where(PlaylistItem.playlist_id == any_(_uuid_array(playlist_ids)), visible)
         .group_by(PlaylistItem.playlist_id)
     )
     counts = dict((await db.execute(counts_stmt)).tuples().all())
+    first_rows = await db.execute(first_thumbnails_stmt(playlist_ids, visible))
+    firsts = {pid: (bucket, key) if key else None for pid, bucket, key in first_rows.tuples()}
+    return {pid: Summary(counts.get(pid, 0), firsts.get(pid)) for pid in playlist_ids}
+
+
+def _uuid_array(ids: list[uuid.UUID]) -> ColumnElement:
+    """Один параметр-массив вместо IN (...): generic plan тот же при любом числе плейлистов
+    на странице."""
+    return cast(ids, ARRAY(PG_UUID(as_uuid=True)))
+
+
+def first_thumbnails_stmt(playlist_ids: list[uuid.UUID], visible: ColumnElement[bool]) -> Select:
+    """Превью первого видимого видео каждого плейлиста: LATERAL … ORDER BY position LIMIT 1
+    по uq_playlist_items_playlist_position — читается начало плейлиста до первого видимого
+    видео, а не весь состав (шаг 2 дня 6: стоимость одного запроса списка)."""
+    pl = aliased(Playlist)
     thumb = aliased(VideoFile)
-    first_stmt = (
-        select(PlaylistItem.playlist_id, thumb.bucket, thumb.s3_key)
+    first = (
+        select(thumb.bucket.label("bucket"), thumb.s3_key.label("key"))
+        .select_from(PlaylistItem)
         .join(Video, Video.id == PlaylistItem.video_id)
         .outerjoin(thumb, and_(thumb.video_id == Video.id, thumb.kind == VideoFileKind.thumbnail))
-        .where(PlaylistItem.playlist_id.in_(playlist_ids), visible)
-        .order_by(PlaylistItem.playlist_id, PlaylistItem.position)
-        .distinct(PlaylistItem.playlist_id)
+        .where(PlaylistItem.playlist_id == pl.id, visible)
+        .order_by(PlaylistItem.position)
+        .limit(1)
+        .lateral("first_visible")
     )
-    firsts = {
-        pid: (bucket, key) if key else None
-        for pid, bucket, key in (await db.execute(first_stmt)).tuples()
-    }
-    return {pid: Summary(counts.get(pid, 0), firsts.get(pid)) for pid in playlist_ids}
+    return (
+        select(pl.id, first.c.bucket, first.c.key)
+        .select_from(pl)
+        .join(first, true())
+        .where(pl.id == any_(_uuid_array(playlist_ids)))
+    )
 
 
 async def channel_page(

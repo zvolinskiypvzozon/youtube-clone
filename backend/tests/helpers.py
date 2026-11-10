@@ -264,6 +264,15 @@ def manage_expected(viewer_kind: str, state: str) -> int:
 # --- Планы запросов ------------------------------------------------------------------------
 
 
+def _plan_literal(value: object) -> str:
+    """Значение параметра для EXECUTE: дата — ISO, список — литерал массива Postgres."""
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, list | tuple):
+        return "{" + ",".join(str(v) for v in value) + "}"
+    return str(value)
+
+
 async def generic_plan(db: AsyncSession, stmt, *, no_sort: bool = False) -> str:
     """Generic plan запроса — так asyncpg выполняет prepared statement после нескольких
     вызовов. Seq scan выключен: на маленькой таблице он дешевле индекса, а проверяем, что
@@ -287,7 +296,7 @@ async def generic_plan(db: AsyncSession, stmt, *, no_sort: bool = False) -> str:
         # Значения — из самого запроса, нетипизированными литералами (типы задал PREPARE).
         # NULL не годится: на NULL planner сворачивает условие в константу.
         values = [compiled.params[name] for name in compiled.positiontup or []]
-        literals = ", ".join(f"'{v.isoformat() if isinstance(v, datetime) else v}'" for v in values)
+        literals = ", ".join(f"'{_plan_literal(v)}'" for v in values)
         rows = await raw.fetch(f"EXPLAIN EXECUTE plan_probe({literals})")
     finally:
         await raw.execute("DEALLOCATE plan_probe")

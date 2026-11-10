@@ -2,7 +2,15 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Path
 
-from app.api.deps import CurrentUser, Cursor, DbSession, Limit, OptionalUser, no_store
+from app.api.deps import (
+    CurrentUser,
+    Cursor,
+    DbSession,
+    Limit,
+    OptionalUser,
+    PlaylistLimit,
+    no_store,
+)
 from app.schemas.common import err
 from app.schemas.playlists import PlaylistPage
 from app.schemas.videos import ChannelOut, SubscriptionOut, VideoPage
@@ -52,7 +60,7 @@ async def channel_playlists(
     viewer: OptionalUser,
     db: DbSession,
     cursor: Cursor = None,
-    limit: Limit = 24,
+    limit: PlaylistLimit = 20,
 ) -> PlaylistPage:
     return await playlists_service.channel_playlists(db, viewer, handle, cursor, limit)
 

@@ -34,6 +34,9 @@ CANNOT_UNBAN = "Недостаточно прав, чтобы разблокир
 ALREADY_BANNED = "Пользователь уже заблокирован"
 NOT_BANNED = "Пользователь не заблокирован"
 LOGIN_REQUIRED = "Требуется вход"
+# Пересчёт счётчиков у активного пользователя бывает долгим; бан — редкое действие staff,
+# поэтому ему — свой предел вместо общих 5 с API (решение архитектора 2026-11-10, шаг 2).
+BAN_STATEMENT_TIMEOUT_MS = 30_000
 
 
 @dataclass(frozen=True)
@@ -71,7 +74,9 @@ async def recount_for_user(db: AsyncSession, user_id: uuid.UUID) -> Recount:
 async def _lock_target(
     db: AsyncSession, actor: User, user_id: uuid.UUID
 ) -> tuple[UserRole | None, User]:
-    """Под блокировкой смен ролей: роль инициатора (перечитанная) и строка цели."""
+    """Под блокировкой смен ролей: роль инициатора (перечитанная) и строка цели.
+    Первым запросом транзакции — свой statement_timeout для бана и разбана."""
+    await users_repo.set_local_statement_timeout(db, BAN_STATEMENT_TIMEOUT_MS)
     await users_repo.lock_role_changes(db)
     actor_role = await users_repo.get_active_role(db, actor.id)
     target = await users_repo.lock_for_ban(db, user_id)

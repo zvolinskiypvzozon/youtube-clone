@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.db import get_sessionmaker
 from app.models import Report, ReportStatus, User, UserRole
 from app.repositories import videos as videos_repo
+from app.schemas.moderation import ReportIn
 from app.schemas.videos import VideoUpdateIn
 from app.services import manage as manage_service
 from app.services import reports as reports_service
@@ -430,3 +431,86 @@ async def test_duplicates_past_precheck_stopped_by_index(
     rs = await waits_for(hold, [post, post])
     assert sorted(r.status_code for r in rs) == [201, 409], [r.text for r in rs]
     assert await _count(db, video.id) == 1
+
+
+# --- Потолок открытых жалоб (шаг 2 дня 6) -------------------------------------------------
+
+
+async def test_open_reports_limit(
+    client: AsyncClient, db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Потолок открытых жалоб пользователя — 409; закрытая жалоба место освобождает."""
+    monkeypatch.setattr(reports_service, "OPEN_REPORTS_LIMIT", 2)
+    owner, user = await api_user(client, db), await api_user(client, db)
+    moderator = await api_user(client, db, UserRole.moderator)
+    channel = await channel_of(db, owner)
+    v1, v2, v3 = [(await seed_video(db, channel, PUB)).id for _ in range(3)]
+    ids = []
+    for vid in (v1, v2):
+        r = await client.post(_url(vid), json=SPAM, headers=user["auth"])
+        assert r.status_code == 201, r.text
+        ids.append(r.json()["id"])
+    r = await client.post(_url(v3), json=SPAM, headers=user["auth"])
+    assert r.status_code == 409
+    assert r.json()["detail"] == reports_service.open_reports_limit_reached()
+    # Потолок — на пользователя: другой жалуется свободно.
+    other = await api_user(client, db)
+    assert (await client.post(_url(v3), json=SPAM, headers=other["auth"])).status_code == 201
+    # Отклонённая жалоба освобождает место.
+    r = await client.post(f"/api/admin/reports/{ids[0]}/dismiss", headers=moderator["auth"])
+    assert r.status_code == 200
+    assert (await client.post(_url(v3), json=SPAM, headers=user["auth"])).status_code == 201
+
+
+async def test_open_reports_limit_concurrent(
+    client: AsyncClient, db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Две жалобы на разные видео на границе потолка: вторая ждёт первую (строка
+    пользователя) и получает 409 — иначе обе увидели бы 0 открытых."""
+    monkeypatch.setattr(reports_service, "OPEN_REPORTS_LIMIT", 1)
+    owner, user = await api_user(client, db), await api_user(client, db)
+    channel = await channel_of(db, owner)
+    v1, v2 = (await seed_video(db, channel, PUB)).id, (await seed_video(db, channel, PUB)).id
+
+    async def first(session: AsyncSession) -> object:
+        me = await session.get(User, uuid.UUID(user["id"]))
+        return await reports_service.create_report(session, me, v1, ReportIn(category="spam"))
+
+    [r] = await waits_for(first, [lambda: client.post(_url(v2), json=SPAM, headers=user["auth"])])
+    assert r.status_code == 409, r.text
+    assert len(await _reports(db, reporter_id=uuid.UUID(user["id"]))) == 1
+
+
+async def test_reports_on_deleted_videos_do_not_count(
+    client: AsyncClient, db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Жалоба на удалённое видео остаётся открытой (её разбирает staff), но место в потолке
+    не занимает: иначе автор, удалив видео, лишил бы пожаловавшегося права жаловаться."""
+    monkeypatch.setattr(reports_service, "OPEN_REPORTS_LIMIT", 1)
+    owner, user = await api_user(client, db), await api_user(client, db)
+    channel = await channel_of(db, owner)
+    v1, v2 = (await seed_video(db, channel, PUB)).id, (await seed_video(db, channel, PUB)).id
+    assert (await client.post(_url(v1), json=SPAM, headers=user["auth"])).status_code == 201
+    assert (await client.post(_url(v2), json=SPAM, headers=user["auth"])).status_code == 409
+    assert (await client.delete(f"/api/videos/{v1}", headers=owner["auth"])).status_code == 204
+    assert (await client.post(_url(v2), json=SPAM, headers=user["auth"])).status_code == 201
+    [orphan] = await _reports(db, video_id=None)
+    assert orphan.status == ReportStatus.open
+
+
+async def test_report_waits_for_ban_of_reporter(client: AsyncClient, db: AsyncSession) -> None:
+    """Жалоба, пришедшая во время бана её автора, ждёт его (строка пользователя) и получает
+    401; жалобы нет."""
+    from app.services import bans as bans_service
+
+    owner, user = await api_user(client, db), await api_user(client, db)
+    mod = await api_user(client, db, UserRole.moderator)
+    video = (await seed_video(db, await channel_of(db, owner), PUB)).id
+
+    async def ban(session: AsyncSession) -> object:
+        me = await session.get(User, uuid.UUID(mod["id"]))
+        return await bans_service.ban(session, me, uuid.UUID(user["id"]), "спам")
+
+    [r] = await waits_for(ban, [lambda: client.post(_url(video), json=SPAM, headers=user["auth"])])
+    assert r.status_code == 401, r.text
+    assert await _reports(db, reporter_id=uuid.UUID(user["id"])) == []

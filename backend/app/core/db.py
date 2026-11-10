@@ -21,7 +21,10 @@ def get_engine() -> AsyncEngine:
         max_overflow=10,
         connect_args={
             "timeout": 5,
-            "server_settings": {"lock_timeout": str(settings.db_lock_timeout_ms)},
+            "server_settings": {
+                "lock_timeout": str(settings.db_lock_timeout_ms),
+                "statement_timeout": str(settings.db_statement_timeout_ms),
+            },
         },
     )
 

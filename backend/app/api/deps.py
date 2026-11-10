@@ -103,3 +103,6 @@ def require_role(*roles: UserRole) -> Callable[..., Awaitable[User]]:
 # Параметры страниц каталога (лента, канал).
 Cursor = Annotated[str | None, Query(max_length=200, description="next_cursor предыдущей страницы")]
 Limit = Annotated[int, Query(ge=1, le=50)]
+# Списки плейлистов дороже (число видео и превью по видимым зрителю видео) — страница меньше
+# (шаг 2 дня 6: стоимость одного запроса).
+PlaylistLimit = Annotated[int, Query(ge=1, le=20)]

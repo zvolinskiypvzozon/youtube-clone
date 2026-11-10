@@ -1,5 +1,6 @@
-"""Обработчик ошибок БД: занятость (lock_timeout, взаимная блокировка) → 503 + Retry-After,
-прочие ошибки БД — по-прежнему 500, а не «занято, повторите»."""
+"""Обработчик ошибок БД: занятость (lock_timeout, взаимная блокировка, statement_timeout —
+шаг 2 дня 6) → 503 + Retry-After, прочие ошибки БД — по-прежнему 500, а не «занято,
+повторите»."""
 
 import pytest
 from fastapi import FastAPI
@@ -45,7 +46,7 @@ async def _get(error: Exception):
         return await c.get("/boom")
 
 
-@pytest.mark.parametrize("sqlstate", ["55P03", "40P01"])
+@pytest.mark.parametrize("sqlstate", ["55P03", "40P01", "57014"])
 @pytest.mark.parametrize("nested", [False, True])
 async def test_busy_errors_are_503(sqlstate: str, nested: bool) -> None:
     r = await _get(_db_error(sqlstate, nested=nested))
@@ -54,7 +55,7 @@ async def test_busy_errors_are_503(sqlstate: str, nested: bool) -> None:
     assert r.json() == {"detail": DB_BUSY}
 
 
-@pytest.mark.parametrize("sqlstate", ["23505", "23502", "57014", "08006"])
+@pytest.mark.parametrize("sqlstate", ["23505", "23502", "08006"])
 async def test_other_db_errors_stay_500(sqlstate: str) -> None:
     r = await _get(_db_error(sqlstate))
     assert r.status_code == 500

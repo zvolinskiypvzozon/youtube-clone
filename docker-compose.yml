@@ -121,6 +121,7 @@ services:
     environment:
       <<: *backend-env
       DB_LOCK_TIMEOUT_MS: "30000"  # API — 5 с (по умолчанию), см. config.py
+      DB_STATEMENT_TIMEOUT_MS: "0"  # без предела; API — 5 с (по умолчанию)
     mem_limit: 2g
     pids_limit: 256
     cap_drop: [ALL]

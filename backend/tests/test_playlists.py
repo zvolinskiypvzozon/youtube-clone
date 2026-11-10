@@ -40,6 +40,7 @@ from tests.helpers import (
     api_user,
     auth_headers,
     channel_of,
+    generic_plan,
     seed_video,
     waits_for,
 )
@@ -855,3 +856,28 @@ async def test_uploading_video_can_be_added(client: AsyncClient, db: AsyncSessio
     assert (await _add(client, owner, pl["id"], video.id)).status_code == 201
     assert await _ids(client, None, pl["id"]) == []
     assert await _ids(client, owner, pl["id"]) == [str(video.id)]
+
+
+# --- Стоимость списков (шаг 2 дня 6) ---------------------------------------------------------
+
+
+async def test_playlist_lists_page_limit_is_20(client: AsyncClient, db: AsyncSession) -> None:
+    owner = await api_user(client, db)
+    for url, headers in (
+        (f"/api/channels/{owner['username']}/playlists", {}),
+        ("/api/me/playlists", owner["auth"]),
+    ):
+        assert (await client.get(url, params={"limit": 20}, headers=headers)).status_code == 200
+        assert (await client.get(url, params={"limit": 21}, headers=headers)).status_code == 422
+
+
+async def test_first_thumbnail_reads_position_index(db: AsyncSession) -> None:
+    """Превью — LATERAL … LIMIT 1 по uq_playlist_items_playlist_position: читается начало
+    плейлиста, а не весь состав (generic plan, как у ленты)."""
+    from app.repositories import playlists as playlists_repo
+    from app.services import policies
+
+    stmt = playlists_repo.first_thumbnails_stmt([uuid.uuid4()], policies.visible_filter(None))
+    plan = await generic_plan(db, stmt)
+    assert "uq_playlist_items_playlist_position" in plan, plan
+    assert "Limit" in plan, plan
