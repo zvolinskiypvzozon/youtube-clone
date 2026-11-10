@@ -84,8 +84,10 @@ flowchart LR
 | `GET /api/videos/{id}/access` | Список допуска (ник, дата), новые сверху; `max_entries` = 100 | как `PATCH` |
 | `POST /api/videos/{id}/access` `{username}` | Выдать допуск по нику: 201 — выдан, 200 — уже был; нет пользователя → 404, себе → 400, лимит 100 → 409 | как `PATCH`; лимит — под блокировкой строки видео |
 | `DELETE /api/videos/{id}/access/{user_id}` | Отозвать допуск; идемпотентно, 204 | как `PATCH` |
-| `GET /api/channels/{handle}` | Карточка канала | всем |
+| `GET /api/channels/{handle}` | Карточка канала; `subscribers_count` и `subscribed` (я подписан; `null` — аноним). Кто подписан — не отдаётся | всем |
 | `GET /api/channels/{handle}/videos` | Видео канала | каталог |
+| `PUT /api/channels/{handle}/subscription` / `DELETE …/subscription` | Подписаться / отписаться (идемпотентно); в ответе `{subscribed, subscribers_count}` | вход; свой канал → 400; неизвестный → 404. Подписка не влияет на доступ к видео |
+| `GET /api/me/subscriptions?cursor=&limit=` | Мои подписки: каналы, новые сверху (keyset по `created_at, channel_id`). Лента видео подписок — день 9 | вход; только свои (параметра «чей список» нет) |
 | `GET /api/me/videos?cursor=&limit=` | «Мои видео»: свои видео в любом статусе со `state`, новые загрузки сверху (keyset по `created_at, id`) | вход; только свой канал (`owned_filter`), и для staff |
 
 Списки — keyset-пагинация по `(момент времени, id)` — `published_at` в каталоге, `created_at`
