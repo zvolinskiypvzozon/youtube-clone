@@ -15,6 +15,12 @@ class VideoVisibility(StrEnum):
     private = "private"  # владелец + список допуска + модераторы/админы
 
 
+class PlaylistVisibility(StrEnum):
+    public = "public"  # страница канала
+    unlisted = "unlisted"  # только по ссылке
+    private = "private"  # только владелец (staff — нет: модерации плейлистов нет)
+
+
 class VideoStatus(StrEnum):
     uploading = "uploading"
     processing = "processing"

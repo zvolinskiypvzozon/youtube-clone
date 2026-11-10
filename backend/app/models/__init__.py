@@ -6,6 +6,7 @@ from app.models.enums import (
     JobType,
     ModerationAction,
     ModerationState,
+    PlaylistVisibility,
     ReactionKind,
     ReportCategory,
     ReportStatus,
@@ -16,6 +17,7 @@ from app.models.enums import (
 )
 from app.models.job import Job
 from app.models.moderation import ModerationLogEntry, Report
+from app.models.playlist import Playlist, PlaylistItem
 from app.models.user import Channel, Subscription, User, UserSession
 from app.models.video import Comment, Reaction, Video, VideoAccess, VideoFile
 
@@ -29,6 +31,9 @@ __all__ = [
     "ModerationAction",
     "ModerationLogEntry",
     "ModerationState",
+    "Playlist",
+    "PlaylistItem",
+    "PlaylistVisibility",
     "Reaction",
     "ReactionKind",
     "Report",
