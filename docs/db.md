@@ -14,7 +14,7 @@ PostgreSQL 17. Схема ведётся миграциями Alembic (`backend/
 | `685d115152a1` comments | comments (плоские, без правки) | 5 |
 | `6507f3ac93de` subscriptions | subscriptions (подписки на каналы) | 5 |
 | — | playlists, playlist_items | 6 |
-| — | reports, moderation_log | 6 |
+| `3c6f18f885c5` reports and moderation log | reports (жалобы со снимком видео), moderation_log (журнал staff) | 6 |
 | — | watch_history | 8–9 |
 
 ## ER-диаграмма (текущая)
@@ -34,6 +34,9 @@ erDiagram
     users ||--o{ comments : "пишет"
     channels ||--o{ subscriptions : "подписчики"
     users ||--o{ subscriptions : "подписан на"
+    videos |o--o{ reports : "жалобы (SET NULL при удалении)"
+    users |o--o{ reports : "жалуется"
+    users |o--o{ moderation_log : "действует (staff)"
 
     users {
         uuid id PK
@@ -118,6 +121,28 @@ erDiagram
         text body "1–2000 символов после btrim, обычный текст"
         timestamptz created_at
     }
+    reports {
+        uuid id PK
+        uuid video_id FK "NULL — видео удалено"
+        uuid reporter_id FK "только staff видит"
+        report_category category "spam | violence | adult | copyright | other"
+        text comment "до 500, необязательно"
+        varchar video_title "снимок"
+        varchar channel_handle "снимок"
+        report_status status "open | resolved | dismissed"
+        uuid resolved_by FK
+        timestamptz resolved_at
+        timestamptz created_at
+    }
+    moderation_log {
+        uuid id PK
+        uuid actor_id FK "staff; NULL — удалён"
+        moderation_action action "video_hide | video_unhide | comment_delete | report_dismiss | user_ban | user_unban"
+        uuid target_id "без FK: запись переживает цель"
+        text reason "до 500"
+        jsonb details "снимок цели"
+        timestamptz created_at
+    }
     jobs {
         uuid id PK
         job_type type "process_video"
@@ -197,6 +222,9 @@ lease не перезапишет результат того, кто перех
 | `ck_jobs_attempts_range`, `ck_jobs_max_attempts_range` | Число попыток не превышает лимит, лимит от 1 до 10 |
 | `ck_jobs_lease_iff_running` | Статус `running` тогда и только тогда, когда есть fencing-токен `locked_by` и срок `locked_until` |
 | `ck_comments_body_length` | Комментарий 1–2000 символов после обрезки пробелов: пустой из одних пробелов не сохранится и в обход API |
+| `uq_reports_open_video_reporter` (частичный уникальный индекс, `WHERE status = 'open'`) | Одна открытая жалоба пользователя на видео: параллельные дубли отсекает БД. После закрытия жалобы можно пожаловаться снова |
+| `ck_reports_resolved_consistent` | Жалоба открыта тогда и только тогда, когда у неё нет `resolved_at` |
+| `ck_reports_comment_length`, `ck_moderation_log_reason_length` | Текст жалобы и причина действия — до 500 символов |
 
 **Каскады.** Удаление пользователя удаляет его канал, видео, сессии, записи допуска и задачи
 (`ON DELETE CASCADE`). В ORM у связей `passive_deletes=True`: каскад выполняет БД. Без этого
@@ -204,6 +232,11 @@ ORM пытался бы обнулить внешний ключ и упирал
 `test_deleting_user_cascades`. Удаление видео каскадом удаляет `video_files`, `video_access`,
 `jobs`, `reactions` и `comments`; блокировки берутся в порядке «задачи → видео →
 комментарии» (ADR 0006, доп. 3 и 5): удаление комментария тоже сначала блокирует видео.
+Жалобы при удалении видео не удаляются: `reports.video_id` → `SET NULL`, снимок (название,
+канал) остаётся в жалобе. Порядок «видео → жалобы» — и при скрытии, и при удалении видео,
+и при создании жалобы (ADR 0006 доп. 6). `moderation_log` ссылается на цель без внешнего
+ключа: журнал переживает удаление видео, комментария, пользователя; удаление staff обнуляет
+`actor_id` и `resolved_by` (`SET NULL`) — без индекса: удаление staff редкое (день 9).
 Объекты в хранилище при удалении видео удаляет приложение (после коммита), так как БД
 о хранилище не знает; остатки при сбое хранилища убирает maintenance.
 
@@ -233,6 +266,11 @@ API — 5 с, worker — 30 с.
 | Каскад при удалении пользователя → его комментарии | `ix_comments_author (author_id)` |
 | «Доступные мне» приватные видео, новые выдачи сверху | `ix_video_access_user_granted (user_id, granted_at DESC)` (PK начинается с `video_id`) |
 | Каскадное удаление видео → задачи (done/failed копятся) | `ix_jobs_video_id` |
+| Очередь модерации: жалобы по статусу, новые сверху (keyset по `(created_at, id)`) | `ix_reports_status_created (status, created_at DESC, id DESC)` |
+| Открытые жалобы видео: закрытие при скрытии | `uq_reports_open_video_reporter (video_id, reporter_id) WHERE status = 'open'` |
+| `SET NULL` при удалении видео — все его жалобы, и закрытые тоже | `ix_reports_video (video_id)` |
+| `SET NULL` при удалении пользователя (день 9) | `ix_reports_reporter (reporter_id)` |
+| История действий над целью (видео, пользователь), новые сверху | `ix_moderation_log_target_created (target_id, created_at DESC)` |
 
 ## Отложено (зафиксировано по итогам ревью схемы)
 

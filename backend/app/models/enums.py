@@ -39,6 +39,29 @@ class ReactionKind(StrEnum):
     dislike = "dislike"
 
 
+class ReportCategory(StrEnum):
+    spam = "spam"
+    violence = "violence"
+    adult = "adult"
+    copyright = "copyright"
+    other = "other"
+
+
+class ReportStatus(StrEnum):
+    open = "open"
+    resolved = "resolved"  # видео скрыто
+    dismissed = "dismissed"  # жалоба отклонена
+
+
+class ModerationAction(StrEnum):
+    video_hide = "video_hide"
+    video_unhide = "video_unhide"
+    comment_delete = "comment_delete"
+    report_dismiss = "report_dismiss"
+    user_ban = "user_ban"  # день 6, шаг 3
+    user_unban = "user_unban"
+
+
 class JobType(StrEnum):
     process_video = "process_video"
 
