@@ -153,10 +153,16 @@ async def _catalog(
     after_cursor: str | None,
     limit: int,
     channel_id: uuid.UUID | None = None,
+    query: str | None = None,
 ) -> VideoPage:
     after = cursor.decode(after_cursor) if after_cursor else None
     rows = await videos_repo.catalog_page(
-        db, policies.listed_filter(), after, limit + 1, channel_id=channel_id
+        db,
+        policies.listed_filter(),
+        after,
+        limit + 1,
+        channel_id=channel_id,
+        title_contains=query,
     )
     has_more = len(rows) > limit
     rows = rows[:limit]
@@ -183,9 +189,13 @@ async def _catalog(
     return VideoPage(items=items, next_cursor=next_cursor)
 
 
-async def feed(db: AsyncSession, after_cursor: str | None, limit: int) -> VideoPage:
-    """Лента главной: каталог (listed_filter) одинаков для всех зрителей."""
-    return await _catalog(db, after_cursor, limit)
+async def feed(
+    db: AsyncSession, after_cursor: str | None, limit: int, query: str | None = None
+) -> VideoPage:
+    """Лента главной и поиск: каталог (listed_filter) одинаков для всех зрителей (K3, K4).
+    Поиск — подстрока в названии, новые сверху (упрощение: без ранжирования по
+    релевантности — оно несовместимо с keyset-пагинацией)."""
+    return await _catalog(db, after_cursor, limit, query=query)
 
 
 async def get_channel(db: AsyncSession, viewer: User | None, handle: str) -> ChannelOut:

@@ -176,6 +176,14 @@ def _no_nul(value: str) -> str:
 
 
 COMMENT_MAX = 2000
+SEARCH_MAX = 100
+
+# Поисковая строка: обрезка пробелов, 1–100 символов, без NUL (иначе 500 из Postgres).
+SearchQuery = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1, max_length=SEARCH_MAX),
+    AfterValidator(_no_nul),
+]
 
 # Длина — после обрезки пробелов по краям, как в CHECK body_length.
 CommentBody = Annotated[

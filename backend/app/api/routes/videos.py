@@ -1,6 +1,7 @@
 import uuid
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, Response, status
+from fastapi import APIRouter, Depends, Query, Response, status
 
 from app.api.deps import CurrentUser, Cursor, DbSession, Limit, OptionalUser, no_store
 from app.schemas.common import err
@@ -13,6 +14,7 @@ from app.schemas.videos import (
     CommentPage,
     ReactionIn,
     ReactionOut,
+    SearchQuery,
     VideoCardOut,
     VideoPage,
     VideoStreamOut,
@@ -30,11 +32,17 @@ router = APIRouter(prefix="/videos", tags=["videos"], dependencies=[Depends(no_s
 @router.get(
     "",
     response_model=VideoPage,
-    summary="Лента главной: готовые публичные видео, новые сверху",
+    summary="Лента главной и поиск: готовые публичные видео, новые сверху",
+    description="С `q` — поиск подстроки в названии без учёта регистра (`%` и `_` — буквально).",
     responses={400: err("Некорректный курсор")},
 )
-async def feed(db: DbSession, cursor: Cursor = None, limit: Limit = 24) -> VideoPage:
-    return await videos_service.feed(db, cursor, limit)
+async def feed(
+    db: DbSession,
+    q: Annotated[SearchQuery | None, Query(description="Строка поиска, 1–100 символов")] = None,
+    cursor: Cursor = None,
+    limit: Limit = 24,
+) -> VideoPage:
+    return await videos_service.feed(db, cursor, limit, query=q)
 
 
 @router.get(

@@ -286,11 +286,18 @@ class CatalogRow:
     thumbnail: tuple[str, str] | None  # (bucket, key)
 
 
+def escape_like(text_: str) -> str:
+    """Экранирует спецсимволы LIKE: пользовательский `%` или `_` — буквальный символ,
+    а не шаблон (иначе `q=%` находил бы всё). Экранирующий символ — `\\`."""
+    return text_.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 def catalog_page_stmt(
     where: ColumnElement[bool],
     after: tuple[datetime, uuid.UUID] | None,
     limit: int,
     channel_id: uuid.UUID | None = None,
+    title_contains: str | None = None,
 ) -> Select:
     """Страница каталога, новые сверху, keyset по (published_at, id).
 
@@ -308,6 +315,10 @@ def catalog_page_stmt(
     )
     if channel_id is not None:
         stmt = stmt.where(Video.channel_id == channel_id)
+    if title_contains is not None:
+        # Подстрока без учёта регистра; ix_videos_title_trgm (GIN, gin_trgm_ops).
+        pattern = f"%{escape_like(title_contains)}%"
+        stmt = stmt.where(Video.title.ilike(pattern, escape="\\"))
     if after is not None:
         stmt = stmt.where(tuple_(Video.published_at, Video.id) < tuple_(*after))
     return stmt
@@ -319,8 +330,10 @@ async def catalog_page(
     after: tuple[datetime, uuid.UUID] | None,
     limit: int,
     channel_id: uuid.UUID | None = None,
+    title_contains: str | None = None,
 ) -> list[CatalogRow]:
-    rows = (await db.execute(catalog_page_stmt(where, after, limit, channel_id))).all()
+    stmt = catalog_page_stmt(where, after, limit, channel_id, title_contains)
+    rows = (await db.execute(stmt)).all()
     return [
         CatalogRow(video, channel, (bucket, key) if key else None)
         for video, channel, bucket, key in rows
