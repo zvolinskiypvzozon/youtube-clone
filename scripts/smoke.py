@@ -34,6 +34,10 @@ class SmokeError(Exception):
     pass
 
 
+# Метка прогона в названии видео: поиск находит ровно это видео, а не остатки прошлых прогонов.
+RUN = secrets.token_hex(4)
+
+
 def step(title: str):
     def wrap(fn):
         def run(*args, **kwargs):
@@ -128,7 +132,7 @@ def make_video() -> bytes:
 @step("Загрузка: старт, части напрямую в хранилище, завершение")
 def upload(auth: dict[str, str], video: bytes) -> str:
     meta = {
-        "title": "Smoke test",
+        "title": f"Smoke test {RUN}",
         "description": "Проверка развёртывания",
         "visibility": "public",
         "content_type": "video/mp4",
@@ -230,6 +234,61 @@ def check_playback(video_id: str) -> str:
     return url
 
 
+@step("Лайк, комментарий, подписка, поиск")
+def check_interactions(owner: dict, video_id: str) -> None:
+    fan = new_user()
+    video = f"/api/videos/{video_id}"
+
+    status, _, body = http("PUT", f"{video}/reaction", data={"kind": "like"}, headers=fan["auth"])
+    expect(status, 200, body)
+    if json.loads(body) != {"my_reaction": "like", "likes_count": 1, "dislikes_count": 0}:
+        raise AssertionError(f"реакция: {body[:200]!r}")
+
+    text = "<b>Отличное</b> видео"  # хранится и отдаётся как текст
+    status, _, body = http("POST", f"{video}/comments", data={"body": text}, headers=fan["auth"])
+    expect(status, 201, body)
+    comment_id = json.loads(body)["id"]
+    status, _, body = http("GET", f"{video}/comments")
+    expect(status, 200, body)
+    if [c["body"] for c in json.loads(body)["items"]] != [text]:
+        raise AssertionError(f"комментарии: {body[:200]!r}")
+    status, _, body = http("GET", video)
+    card = json.loads(body)
+    if (card["likes_count"], card["comments_count"]) != (1, 1):
+        raise AssertionError(f"счётчики карточки: {card['likes_count']}, {card['comments_count']}")
+    # Владелец видео удаляет комментарий под своим видео.
+    status, _, body = http("DELETE", f"/api/comments/{comment_id}", headers=owner["auth"])
+    expect(status, 204, body)
+    if json.loads(http("GET", video)[2])["comments_count"] != 0:
+        raise AssertionError("счётчик комментариев после удаления")
+
+    channel = f"/api/channels/{owner['username']}"
+    status, _, body = http("PUT", f"{channel}/subscription", headers=fan["auth"])
+    expect(status, 200, body)
+    if json.loads(body) != {"subscribed": True, "subscribers_count": 1}:
+        raise AssertionError(f"подписка: {body[:200]!r}")
+    status, _, body = http("PUT", f"{channel}/subscription", headers=owner["auth"])
+    expect(status, 400, body)  # на свой канал нельзя
+    status, _, body = http("GET", channel, headers=fan["auth"])
+    expect(status, 200, body)
+    if json.loads(body)["subscribed"] is not True:
+        raise AssertionError("в карточке канала нет subscribed")
+    status, _, body = http("GET", "/api/me/subscriptions", headers=fan["auth"])
+    expect(status, 200, body)
+    if [i["channel"]["handle"] for i in json.loads(body)["items"]] != [owner["username"]]:
+        raise AssertionError(f"мои подписки: {body[:200]!r}")
+
+    query = urllib.parse.urlencode({"q": f"TEST {RUN}"})  # регистр не важен
+    status, _, body = http("GET", f"/api/videos?{query}")
+    expect(status, 200, body)
+    if [i["id"] for i in json.loads(body)["items"]] != [video_id]:
+        raise AssertionError(f"поиск: {body[:200]!r}")
+    status, _, body = http("GET", "/api/videos?q=%25")  # `%` — буквальный символ, не шаблон
+    expect(status, 200, body)
+    if video_id in {i["id"] for i in json.loads(body)["items"]}:
+        raise AssertionError("поиск по `%` нашёл видео без `%` в названии")
+
+
 @step("Хранилище закрыто: без подписи 403")
 def check_storage_closed(video_id: str) -> None:
     for path in (f"/yt-raw/raw/{video_id}/source", f"/yt-media/videos/{video_id}/"):
@@ -314,6 +373,7 @@ def main() -> int:
         wait_ready(owner, video_id)
         check_card(owner, video_id)
         media_url = check_playback(video_id)
+        check_interactions(owner, video_id)
         check_storage_closed(video_id)
         check_privacy(owner, video_id)
         check_delete(owner, video_id, media_url)
