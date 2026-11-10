@@ -12,7 +12,7 @@ PostgreSQL 17. Схема ведётся миграциями Alembic (`backend/
 | `d39fd7e9e8b8` ix_videos_channel_created | индекс «Моих видео» | 4 |
 | `feae87d73a60` reactions | reactions (лайк/дизлайк) | 5 |
 | `685d115152a1` comments | comments (плоские, без правки) | 5 |
-| — | subscriptions | 5 |
+| `6507f3ac93de` subscriptions | subscriptions (подписки на каналы) | 5 |
 | — | playlists, playlist_items | 6 |
 | — | reports, moderation_log | 6 |
 | — | watch_history | 8–9 |
@@ -32,6 +32,8 @@ erDiagram
     users ||--o{ reactions : "реагирует"
     videos ||--o{ comments : "комментарии"
     users ||--o{ comments : "пишет"
+    channels ||--o{ subscriptions : "подписчики"
+    users ||--o{ subscriptions : "подписан на"
 
     users {
         uuid id PK
@@ -53,6 +55,11 @@ erDiagram
         varchar avatar_key "ключ в хранилище"
         varchar banner_key
         int subscribers_count "денормализация"
+    }
+    subscriptions {
+        uuid channel_id PK,FK
+        uuid user_id PK,FK
+        timestamptz created_at
     }
     sessions {
         uuid id PK
@@ -162,12 +169,18 @@ lease не перезапишет результат того, кто перех
 Комментарии: добавление — атомарный `UPDATE comments_count + 1` с условиями политики в самом
 запросе (как у просмотров), затем `INSERT` в той же транзакции; удаление — блокировка строки
 видео, затем `DELETE … RETURNING`, и счётчик −1, только если строку удалил этот запрос.
+Подписки: `INSERT … ON CONFLICT DO NOTHING RETURNING` / `DELETE … RETURNING` говорят, изменил
+ли состояние именно этот запрос, и только тогда `subscribers_count` меняется атомарным
+`UPDATE … + delta` — без блокировки строки канала (параллельные запросы одного пользователя
+упорядочивает PK подписки). Порядок блокировок «подписка → канал».
 Изменение счётчиков не сдвигает `videos.updated_at` (время правки метаданных).
 **Известный дрейф (день 6):** каскад при удалении пользователя (`users → reactions`,
-`users → comments`) счётчики чужих видео не уменьшает. Путь удаления пользователя на дне 6
-обязан пересчитать `likes_count`, `dislikes_count`, `comments_count` затронутых видео.
+`users → comments`, `users → subscriptions`) счётчики чужих видео и каналов не уменьшает.
+Путь удаления пользователя (и бан/разбан) на дне 6 обязан пересчитать `likes_count`,
+`dislikes_count`, `comments_count` затронутых видео и `subscribers_count` каналов.
 **Известное ограничение:** реакции (а с шагов 2 и 5 — комментарии и просмотры) популярного
 видео сериализуются на одной строке `videos`; при очереди дольше `lock_timeout` — 503.
+То же для `subscribers_count` популярного канала (строка `channels`).
 Для масштаба тестового задания приемлемо; дальше — отдельная таблица счётчиков.
 
 **Ограничения целостности в БД, а не только в коде:**
@@ -216,6 +229,7 @@ API — 5 с, worker — 30 с.
 | Задачи с истёкшим lease (упавший worker) | `ix_jobs_running_lease (locked_until) WHERE status='running'` |
 | «Понравившиеся» (день 9), каскад при удалении пользователя | `ix_reactions_user_kind_created (user_id, kind, created_at DESC)` (PK начинается с `video_id`); смена реакции обновляет `created_at` |
 | Комментарии видео, новые сверху (keyset по `(created_at, id)`) | `ix_comments_video_created (video_id, created_at DESC, id DESC)` |
+| «Мои подписки», новые сверху (keyset по `(created_at, channel_id)`); лента подписок (день 9); каскад при удалении пользователя | `ix_subscriptions_user_created (user_id, created_at DESC, channel_id DESC)` (PK начинается с `channel_id` — он же для каскада при удалении канала) |
 | Каскад при удалении пользователя → его комментарии | `ix_comments_author (author_id)` |
 | «Доступные мне» приватные видео, новые выдачи сверху | `ix_video_access_user_granted (user_id, granted_at DESC)` (PK начинается с `video_id`) |
 | Каскадное удаление видео → задачи (done/failed копятся) | `ix_jobs_video_id` |

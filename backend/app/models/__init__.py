@@ -12,7 +12,7 @@ from app.models.enums import (
     VideoVisibility,
 )
 from app.models.job import Job
-from app.models.user import Channel, User, UserSession
+from app.models.user import Channel, Subscription, User, UserSession
 from app.models.video import Comment, Reaction, Video, VideoAccess, VideoFile
 
 __all__ = [
@@ -25,6 +25,7 @@ __all__ = [
     "ModerationState",
     "Reaction",
     "ReactionKind",
+    "Subscription",
     "User",
     "UserRole",
     "UserSession",

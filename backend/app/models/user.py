@@ -91,3 +91,29 @@ class UserSession(UUIDPk, CreatedAt, Base):
     )
     ip: Mapped[str | None] = mapped_column(INET)
     user_agent: Mapped[str | None] = mapped_column(String(300))
+
+
+class Subscription(CreatedAt, Base):
+    """Подписка пользователя на канал: одна строка на пару. Счётчик
+    channels.subscribers_count меняется в той же транзакции (services/subscriptions.py).
+    Список подписчиков канала наружу не отдаётся — только счётчик; свои подписки видит
+    только сам пользователь."""
+
+    __tablename__ = "subscriptions"
+    # «Мои подписки» (keyset по (created_at, channel_id)), лента подписок (день 9),
+    # каскад при удалении пользователя.
+    __table_args__ = (
+        Index(
+            "ix_subscriptions_user_created",
+            "user_id",
+            text("created_at DESC"),
+            text("channel_id DESC"),
+        ),
+    )
+
+    channel_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("channels.id", ondelete="CASCADE"), primary_key=True
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
