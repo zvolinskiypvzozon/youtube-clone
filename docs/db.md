@@ -11,7 +11,8 @@ PostgreSQL 17. Схема ведётся миграциями Alembic (`backend/
 | `c7a041934a27` initial schema | users, channels, sessions, videos, video_files, video_access, jobs | 2 |
 | `d39fd7e9e8b8` ix_videos_channel_created | индекс «Моих видео» | 4 |
 | `feae87d73a60` reactions | reactions (лайк/дизлайк) | 5 |
-| — | comments, subscriptions | 5 |
+| `685d115152a1` comments | comments (плоские, без правки) | 5 |
+| — | subscriptions | 5 |
 | — | playlists, playlist_items | 6 |
 | — | reports, moderation_log | 6 |
 | — | watch_history | 8–9 |
@@ -29,6 +30,8 @@ erDiagram
     videos ||--o{ jobs : "обработка"
     videos ||--o{ reactions : "лайки и дизлайки"
     users ||--o{ reactions : "реагирует"
+    videos ||--o{ comments : "комментарии"
+    users ||--o{ comments : "пишет"
 
     users {
         uuid id PK
@@ -101,6 +104,13 @@ erDiagram
         reaction_kind kind "like | dislike"
         timestamptz created_at
     }
+    comments {
+        uuid id PK
+        uuid video_id FK
+        uuid author_id FK
+        text body "1–2000 символов после btrim, обычный текст"
+        timestamptz created_at
+    }
     jobs {
         uuid id PK
         job_type type "process_video"
@@ -149,7 +159,13 @@ lease не перезапишет результат того, кто перех
 Реакции: одна строка на пару (видео, пользователь) — лайк и дизлайк взаимоисключающие;
 все изменения реакций одного видео сериализуются блокировкой строки видео (`FOR NO KEY UPDATE`),
 прежняя реакция читается под ней, счётчики меняются на разницу «было → стало» (K6).
+Комментарии: добавление — атомарный `UPDATE comments_count + 1` с условиями политики в самом
+запросе (как у просмотров), затем `INSERT` в той же транзакции; удаление — блокировка строки
+видео, затем `DELETE … RETURNING`, и счётчик −1, только если строку удалил этот запрос.
 Изменение счётчиков не сдвигает `videos.updated_at` (время правки метаданных).
+**Известный дрейф (день 6):** каскад при удалении пользователя (`users → reactions`,
+`users → comments`) счётчики чужих видео не уменьшает. Путь удаления пользователя на дне 6
+обязан пересчитать `likes_count`, `dislikes_count`, `comments_count` затронутых видео.
 **Известное ограничение:** реакции (а с шагов 2 и 5 — комментарии и просмотры) популярного
 видео сериализуются на одной строке `videos`; при очереди дольше `lock_timeout` — 503.
 Для масштаба тестового задания приемлемо; дальше — отдельная таблица счётчиков.
@@ -167,12 +183,14 @@ lease не перезапишет результат того, кто перех
 | `uq_jobs_active_per_video` (частичный уникальный индекс) | На видео не больше одной активной задачи обработки. Повторный `complete` загрузки не создаст дубль; после `failed` новая задача разрешена |
 | `ck_jobs_attempts_range`, `ck_jobs_max_attempts_range` | Число попыток не превышает лимит, лимит от 1 до 10 |
 | `ck_jobs_lease_iff_running` | Статус `running` тогда и только тогда, когда есть fencing-токен `locked_by` и срок `locked_until` |
+| `ck_comments_body_length` | Комментарий 1–2000 символов после обрезки пробелов: пустой из одних пробелов не сохранится и в обход API |
 
 **Каскады.** Удаление пользователя удаляет его канал, видео, сессии, записи допуска и задачи
 (`ON DELETE CASCADE`). В ORM у связей `passive_deletes=True`: каскад выполняет БД. Без этого
 ORM пытался бы обнулить внешний ключ и упирался в NOT NULL; ошибку поймал тест
-`test_deleting_user_cascades`. Удаление видео каскадом удаляет `video_files`, `video_access`
-и `jobs`; блокировки берутся в порядке «задачи → видео», как у worker-а (ADR 0006, доп. 3).
+`test_deleting_user_cascades`. Удаление видео каскадом удаляет `video_files`, `video_access`,
+`jobs`, `reactions` и `comments`; блокировки берутся в порядке «задачи → видео →
+комментарии» (ADR 0006, доп. 3 и 5): удаление комментария тоже сначала блокирует видео.
 Объекты в хранилище при удалении видео удаляет приложение (после коммита), так как БД
 о хранилище не знает; остатки при сбое хранилища убирает maintenance.
 
@@ -197,6 +215,8 @@ API — 5 с, worker — 30 с.
 | Следующая задача для worker | `ix_jobs_queued (run_after) WHERE status='queued'` |
 | Задачи с истёкшим lease (упавший worker) | `ix_jobs_running_lease (locked_until) WHERE status='running'` |
 | «Понравившиеся» (день 9), каскад при удалении пользователя | `ix_reactions_user_kind_created (user_id, kind, created_at DESC)` (PK начинается с `video_id`); смена реакции обновляет `created_at` |
+| Комментарии видео, новые сверху (keyset по `(created_at, id)`) | `ix_comments_video_created (video_id, created_at DESC, id DESC)` |
+| Каскад при удалении пользователя → его комментарии | `ix_comments_author (author_id)` |
 | «Доступные мне» приватные видео, новые выдачи сверху | `ix_video_access_user_granted (user_id, granted_at DESC)` (PK начинается с `video_id`) |
 | Каскадное удаление видео → задачи (done/failed копятся) | `ix_jobs_video_id` |
 

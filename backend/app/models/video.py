@@ -191,3 +191,28 @@ class Reaction(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+
+
+class Comment(UUIDPk, Base):
+    """Комментарий к видео: плоский, без правки (упрощение дня 5). Счётчик
+    videos.comments_count меняется в той же транзакции (services/comments.py)."""
+
+    __tablename__ = "comments"
+    __table_args__ = (
+        CheckConstraint("char_length(btrim(body)) BETWEEN 1 AND 2000", name="body_length"),
+        # Лента комментариев видео: новые сверху, keyset по (created_at, id).
+        Index("ix_comments_video_created", "video_id", text("created_at DESC"), text("id DESC")),
+        # Каскад при удалении пользователя.
+        Index("ix_comments_author", "author_id"),
+    )
+
+    video_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("videos.id", ondelete="CASCADE"), nullable=False
+    )
+    author_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )

@@ -13,11 +13,12 @@ from app.models.enums import (
 )
 from app.models.job import Job
 from app.models.user import Channel, User, UserSession
-from app.models.video import Reaction, Video, VideoAccess, VideoFile
+from app.models.video import Comment, Reaction, Video, VideoAccess, VideoFile
 
 __all__ = [
     "Base",
     "Channel",
+    "Comment",
     "Job",
     "JobStatus",
     "JobType",
