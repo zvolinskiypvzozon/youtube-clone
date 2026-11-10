@@ -15,6 +15,7 @@ PostgreSQL 17. Схема ведётся миграциями Alembic (`backend/
 | `6507f3ac93de` subscriptions | subscriptions (подписки на каналы) | 5 |
 | `3c6f18f885c5` reports and moderation log | reports (жалобы со снимком видео), moderation_log (журнал staff) | 6 |
 | `020f33bca74b` playlists and playlist items | playlists, playlist_items (только свои видео канала) | 6 |
+| `ef599b78e7c1` ban constraints and role_change action | `users.banned_by_role`, CHECK бана и причины модерации, `moderation_action.role_change` | 6 |
 | — | watch_history | 8–9 |
 
 ## ER-диаграмма (текущая)
@@ -48,7 +49,8 @@ erDiagram
         varchar password_hash "argon2id"
         user_role role "user | moderator | admin"
         bool is_banned
-        text banned_reason
+        text banned_reason "1–500; есть ⇔ забанен"
+        user_role banned_by_role "кто забанил; есть ⇔ забанен"
         timestamptz created_at
         timestamptz updated_at
     }
@@ -99,7 +101,7 @@ erDiagram
         video_visibility visibility "public | unlisted | private"
         video_status status "uploading | processing | ready | failed"
         moderation_state moderation "ok | hidden"
-        text moderation_reason
+        text moderation_reason "1–500; есть ⇔ hidden"
         text failure_reason
         bigint size_bytes "до 2 ГБ"
         int duration_seconds "до 60 мин (CHECK + ffprobe в worker)"
@@ -155,7 +157,7 @@ erDiagram
     moderation_log {
         uuid id PK
         uuid actor_id FK "staff; NULL — удалён"
-        moderation_action action "video_hide | video_unhide | comment_delete | report_dismiss | user_ban | user_unban"
+        moderation_action action "video_hide | video_unhide | comment_delete | report_dismiss | user_ban | user_unban | role_change"
         uuid target_id "без FK: запись переживает цель"
         text reason "до 500"
         jsonb details "снимок цели"
@@ -217,10 +219,13 @@ lease не перезапишет результат того, кто перех
 `UPDATE … + delta` — без блокировки строки канала (параллельные запросы одного пользователя
 упорядочивает PK подписки). Порядок блокировок «подписка → канал».
 Изменение счётчиков не сдвигает `videos.updated_at` (время правки метаданных).
-**Известный дрейф (день 6):** каскад при удалении пользователя (`users → reactions`,
-`users → comments`, `users → subscriptions`) счётчики чужих видео и каналов не уменьшает.
-Путь удаления пользователя (и бан/разбан) на дне 6 обязан пересчитать `likes_count`,
-`dislikes_count`, `comments_count` затронутых видео и `subscribers_count` каналов.
+**Бан (день 6) и счётчики:** реакции, комментарии и подписки забаненного в счётчиках не
+учитываются. `bans.recount_for_user` при бане и разбане полностью пересчитывает (`COUNT` по
+строкам незабаненных) `likes_count`, `dislikes_count`, `comments_count` затронутых видео
+и `subscribers_count` каналов, блокируя строки по `id` (ADR 0006 доп. 8). Инвариант «счётчик =
+COUNT по строкам незабаненных» проверяется тестами по всей БД. **Известный дрейф (до дня 9):**
+каскад при удалении пользователя счётчики чужих видео и каналов не уменьшает — удаление
+пользователя (день 9) вызовет тот же пересчёт.
 **Известное ограничение:** реакции (а с шагов 2 и 5 — комментарии и просмотры) популярного
 видео сериализуются на одной строке `videos`; при очереди дольше `lock_timeout` — 503.
 То же для `subscribers_count` популярного канала (строка `channels`).
@@ -243,6 +248,8 @@ lease не перезапишет результат того, кто перех
 | `uq_reports_open_video_reporter` (частичный уникальный индекс, `WHERE status = 'open'`) | Одна открытая жалоба пользователя на видео: параллельные дубли отсекает БД. После закрытия жалобы можно пожаловаться снова |
 | `ck_reports_resolved_consistent` | Жалоба открыта тогда и только тогда, когда у неё нет `resolved_at` |
 | `ck_reports_comment_length`, `ck_moderation_log_reason_length` | Текст жалобы и причина действия — до 500 символов |
+| `ck_users_ban_consistent`, `ck_users_banned_reason_length` | Забанен тогда и только тогда, когда есть причина (1–500) и роль забанившего (её проверяет разбан: бан админа модератор не снимает) |
+| `ck_videos_moderation_reason_consistent`, `ck_videos_moderation_reason_length` | Причина модерации (её видит владелец) есть ровно у скрытого видео, 1–500 символов. Миграция приводит данные к правилу явно до CHECK |
 | `ck_playlists_title_length`, `ck_playlists_description_length` | Название плейлиста 1–150 символов после обрезки пробелов, описание до 5000 |
 | `pk_playlist_items (playlist_id, video_id)` | Видео в плейлисте один раз: повторное добавление — 200 без изменений (`ON CONFLICT DO NOTHING`) |
 | `uq_playlist_items_playlist_position`, `ck_playlist_items_position_positive` | Позиция уникальна в плейлисте и ≥ 1 (порядок и keyset-пагинация). Вторая защита к блокировке строки плейлиста: две вставки с одинаковым `max + 1` не пройдут |
@@ -287,10 +294,10 @@ API — 5 с, worker — 30 с.
 | Очистка просроченных сессий | `ix_sessions_expires_at` |
 | Следующая задача для worker | `ix_jobs_queued (run_after) WHERE status='queued'` |
 | Задачи с истёкшим lease (упавший worker) | `ix_jobs_running_lease (locked_until) WHERE status='running'` |
-| «Понравившиеся» (день 9), каскад при удалении пользователя | `ix_reactions_user_kind_created (user_id, kind, created_at DESC)` (PK начинается с `video_id`); смена реакции обновляет `created_at` |
+| «Понравившиеся» (день 9), каскад при удалении пользователя, видео с реакциями забаненного (пересчёт при бане) | `ix_reactions_user_kind_created (user_id, kind, created_at DESC)` (PK начинается с `video_id`); смена реакции обновляет `created_at` |
 | Комментарии видео, новые сверху (keyset по `(created_at, id)`) | `ix_comments_video_created (video_id, created_at DESC, id DESC)` |
-| «Мои подписки», новые сверху (keyset по `(created_at, channel_id)`); лента подписок (день 9); каскад при удалении пользователя | `ix_subscriptions_user_created (user_id, created_at DESC, channel_id DESC)` (PK начинается с `channel_id` — он же для каскада при удалении канала) |
-| Каскад при удалении пользователя → его комментарии | `ix_comments_author (author_id)` |
+| «Мои подписки», новые сверху (keyset по `(created_at, channel_id)`); лента подписок (день 9); каскад при удалении пользователя; каналы для пересчёта при бане | `ix_subscriptions_user_created (user_id, created_at DESC, channel_id DESC)` (PK начинается с `channel_id` — он же для каскада при удалении канала) |
+| Каскад при удалении пользователя → его комментарии; видео с комментариями забаненного (пересчёт при бане) | `ix_comments_author (author_id)` |
 | «Доступные мне» приватные видео, новые выдачи сверху | `ix_video_access_user_granted (user_id, granted_at DESC)` (PK начинается с `video_id`) |
 | Каскадное удаление видео → задачи (done/failed копятся) | `ix_jobs_video_id` |
 | Очередь модерации: жалобы по статусу, новые сверху (keyset по `(created_at, id)`) | `ix_reports_status_created (status, created_at DESC, id DESC)` |
