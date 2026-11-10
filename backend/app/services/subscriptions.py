@@ -15,7 +15,7 @@ import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.errors import BadRequest, NotFound
+from app.core.errors import BadRequest, Conflict
 from app.models import Channel, User
 from app.repositories import channels as channels_repo
 from app.repositories import subscriptions as subscriptions_repo
@@ -25,17 +25,17 @@ from app.schemas.videos import (
     MySubscriptionPage,
     SubscriptionOut,
 )
-from app.services import cursor
-from app.services.videos import CHANNEL_NOT_FOUND
+from app.services import bans, cursor, policies
+from app.services import videos as videos_service
 
 SELF_SUBSCRIPTION = "Нельзя подписаться на свой канал"
+OWNER_BANNED_NO_SUBSCRIPTION = "Автор канала заблокирован: подписка недоступна"
 
 
-async def _channel(db: AsyncSession, handle: str) -> Channel:
-    channel = await channels_repo.get_by_handle(db, handle)
-    if channel is None:
-        raise NotFound(CHANNEL_NOT_FOUND)
-    return channel
+async def _channel(db: AsyncSession, viewer: User, handle: str) -> tuple[Channel, bool]:
+    """Канал забаненного — 404 и для подписки, и для отписки (одно правило для контента
+    забаненного, ADR 0006 доп. 8); staff его видит — второе значение «владелец забанен»."""
+    return await videos_service.viewable_channel(db, viewer, handle)
 
 
 async def _fresh_count(db: AsyncSession, channel_id: uuid.UUID) -> int:
@@ -46,9 +46,12 @@ async def _fresh_count(db: AsyncSession, channel_id: uuid.UUID) -> int:
 
 
 async def subscribe(db: AsyncSession, viewer: User, handle: str) -> SubscriptionOut:
-    channel = await _channel(db, handle)
+    channel, owner_banned = await _channel(db, viewer, handle)
     if channel.owner_id == viewer.id:
         raise BadRequest(SELF_SUBSCRIPTION)
+    if owner_banned:  # видит только staff; подписка — взаимодействие, как реакция (409)
+        raise Conflict(OWNER_BANNED_NO_SUBSCRIPTION)
+    await bans.lock_self_active(db, viewer)  # «пользователь → канал», как у бана (доп. 8)
     if await subscriptions_repo.add(db, channel.id, viewer.id):
         count = await channels_repo.add_subscribers(db, channel.id, +1)
     else:
@@ -59,7 +62,9 @@ async def subscribe(db: AsyncSession, viewer: User, handle: str) -> Subscription
 
 async def unsubscribe(db: AsyncSession, viewer: User, handle: str) -> SubscriptionOut:
     """Идемпотентно: подписки нет (в том числе на свой канал) — тоже 200."""
-    channel = await _channel(db, handle)
+    channel, _ = await _channel(db, viewer, handle)  # отписка staff убирает данные — можно
+    # И при отписке: −1 после пересчёта бана ушёл бы в минус относительно строк.
+    await bans.lock_self_active(db, viewer)
     if await subscriptions_repo.remove(db, channel.id, viewer.id):
         count = await channels_repo.add_subscribers(db, channel.id, -1)
     else:
@@ -72,7 +77,9 @@ async def my_subscriptions(
     db: AsyncSession, viewer: User, after_cursor: str | None, limit: int
 ) -> MySubscriptionPage:
     after = cursor.decode(after_cursor) if after_cursor else None
-    rows = await subscriptions_repo.page_of_user(db, viewer.id, after, limit + 1)
+    rows = await subscriptions_repo.page_of_user(
+        db, viewer.id, policies.channel_visible_filter(viewer), after, limit + 1
+    )
     has_more = len(rows) > limit
     rows = rows[:limit]
     items = [

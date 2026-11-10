@@ -25,6 +25,7 @@ from app.models import (
     Channel,
     Job,
     JobType,
+    User,
     Video,
     VideoAccess,
     VideoFile,
@@ -77,22 +78,32 @@ async def create_uploading(
     return video
 
 
+@dataclass(frozen=True)
+class ForView:
+    video: Video
+    channel: Channel
+    has_access: bool  # зритель в списке допуска
+    owner_banned: bool
+
+
 async def get_for_view(
     db: AsyncSession, video_id: uuid.UUID, viewer_id: uuid.UUID | None
-) -> tuple[Video, Channel, bool] | None:
-    """Видео, его канал и «зритель в списке допуска» — одним запросом, для политики."""
+) -> ForView | None:
+    """Видео, его канал, «зритель в списке допуска» и «владелец забанен» — одним запросом,
+    для политики."""
     has_access = (
         exists().where(VideoAccess.video_id == Video.id, VideoAccess.user_id == viewer_id)
         if viewer_id is not None
         else false()
     )
     stmt = (
-        select(Video, Channel, has_access.label("has_access"))
+        select(Video, Channel, has_access.label("has_access"), User.is_banned)
         .join(Channel, Channel.id == Video.channel_id)
+        .join(User, User.id == Channel.owner_id)
         .where(Video.id == video_id)
     )
     row = (await db.execute(stmt)).one_or_none()
-    return (row[0], row[1], bool(row[2])) if row else None
+    return ForView(row[0], row[1], bool(row[2]), bool(row[3])) if row else None
 
 
 async def get_owned_for_update(

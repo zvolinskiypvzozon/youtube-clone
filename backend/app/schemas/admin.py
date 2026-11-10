@@ -70,6 +70,12 @@ class ReportVideoOut(BaseModel):
     moderation: ModerationState | None
     visibility: VideoVisibility | None
     status: VideoStatus | None
+    owner_id: uuid.UUID | None = Field(
+        default=None, description="Владелец видео (для бана); null — видео удалено"
+    )
+    owner_banned: bool | None = Field(
+        default=None, description="Владелец заблокирован; null — видео удалено"
+    )
 
 
 class ReportQueueItem(BaseModel):
@@ -122,3 +128,25 @@ class ReportDismissOut(BaseModel):
     status: ReportStatus
     resolved_by: uuid.UUID | None
     resolved_at: datetime | None
+
+
+# --- Бан ------------------------------------------------------------------------------------
+
+
+class BanIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    reason: ModerationReason = Field(description="Причина бана, 1–500 символов")
+
+
+class BanOut(BaseModel):
+    """Без email: бан доступен модератору, а email пользователей видит только админ."""
+
+    user_id: uuid.UUID
+    username: str
+    role: UserRole
+    is_banned: bool
+    banned_reason: str | None
+    banned_by_role: UserRole | None = Field(description="Роль того, кто забанил")
+    recount_videos: int = Field(description="Видео с пересчитанными счётчиками")
+    recount_channels: int = Field(description="Каналы с пересчитанным числом подписчиков")

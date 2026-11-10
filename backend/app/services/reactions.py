@@ -21,7 +21,7 @@ from app.repositories import access as access_repo
 from app.repositories import reactions as reactions_repo
 from app.repositories import videos as videos_repo
 from app.schemas.videos import ReactionOut
-from app.services import policies
+from app.services import bans, policies
 from app.services import videos as videos_service
 from app.services.videos import VIDEO_NOT_FOUND, Viewable
 
@@ -35,7 +35,8 @@ async def set_reaction(
 ) -> ReactionOut:
     """kind=None — снять реакцию."""
     viewable = await videos_service.get_viewable(db, viewer, video_id)  # can_view, иначе 404
-    videos_service.ensure_interactive(viewable.video)  # готово и не скрыто, иначе 409
+    # готово, не скрыто, автор видео не забанен — иначе 409
+    videos_service.ensure_interactive(viewable.video, owner_banned=viewable.owner_banned)
     # Повтор той же реакции — ответ без блокировки строки видео (самый дешёвый спам-вектор
     # не должен занимать строку, нужную правке, worker-у и удалению; аудит).
     if await reactions_repo.get_kind(db, video_id, viewer.id) == kind:
@@ -46,6 +47,7 @@ async def set_reaction(
         await db.commit()
         return out
 
+    await bans.lock_self_active(db, viewer)  # «пользователь → видео», как у бана (доп. 8)
     video = await _lock_viewable(db, viewer, viewable)
     old = await reactions_repo.get_kind(db, video_id, viewer.id)  # под блокировкой
     if old == kind:  # параллельный запрос того же пользователя успел раньше
@@ -80,14 +82,18 @@ async def _lock_viewable(db: AsyncSession, viewer: User, viewable: Viewable) -> 
         raise NotFound(VIDEO_NOT_FOUND)
     has_access = await access_repo.get(db, video.id, viewer.id) is not None
     facts = policies.VideoFacts.of(
-        video, owner_id=viewable.channel.owner_id, viewer_has_access=has_access
+        video,
+        owner_id=viewable.channel.owner_id,
+        viewer_has_access=has_access,
+        owner_banned=viewable.owner_banned,
     )
     if not policies.can_view(viewer, facts):
         await db.rollback()
         raise NotFound(VIDEO_NOT_FOUND)
-    if not policies.can_interact(video):  # стало скрытым или не готовым, пока ждали
+    if not policies.can_interact(video, owner_banned=viewable.owner_banned):  # пока ждали
         try:
-            videos_service.ensure_interactive(video)  # причина — до rollback (он гасит объекты)
+            # Причина — до rollback (он гасит объекты).
+            videos_service.ensure_interactive(video, owner_banned=viewable.owner_banned)
         finally:
             await db.rollback()
     return video

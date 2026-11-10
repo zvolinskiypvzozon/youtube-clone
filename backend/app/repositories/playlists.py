@@ -28,6 +28,7 @@ from app.models import (
     Playlist,
     PlaylistItem,
     PlaylistVisibility,
+    User,
     Video,
     VideoFile,
     VideoFileKind,
@@ -36,14 +37,16 @@ from app.models import (
 
 async def get_with_channel(
     db: AsyncSession, playlist_id: uuid.UUID
-) -> tuple[Playlist, Channel] | None:
+) -> tuple[Playlist, Channel, bool] | None:
+    """Плейлист, канал и «владелец забанен» — для policies.can_view_playlist."""
     stmt = (
-        select(Playlist, Channel)
+        select(Playlist, Channel, User.is_banned)
         .join(Channel, Channel.id == Playlist.channel_id)
+        .join(User, User.id == Channel.owner_id)
         .where(Playlist.id == playlist_id)
     )
     row = (await db.execute(stmt)).one_or_none()
-    return (row[0], row[1]) if row else None
+    return (row[0], row[1], bool(row[2])) if row else None
 
 
 async def lock_channel(db: AsyncSession, channel_id: uuid.UUID) -> None:

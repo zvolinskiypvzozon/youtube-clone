@@ -8,6 +8,8 @@ from app.models import ReportStatus, User, UserRole
 from app.schemas.admin import (
     AdminUserOut,
     AdminUserPage,
+    BanIn,
+    BanOut,
     ReportDismissIn,
     ReportDismissOut,
     ReportQueuePage,
@@ -17,6 +19,7 @@ from app.schemas.admin import (
 )
 from app.schemas.common import err
 from app.services import admin as admin_service
+from app.services import bans as bans_service
 from app.services import moderation as moderation_service
 from app.services import policies
 
@@ -52,13 +55,65 @@ async def list_users(
     "/users/{user_id}",
     response_model=AdminUserOut,
     summary="Сменить роль пользователя (user / moderator / admin)",
-    responses={404: err("Пользователь не найден"), 409: err("Нельзя понизить собственную роль")},
+    responses={
+        404: err("Пользователь не найден"),
+        409: err("Своя роль, последний админ или пользователь заблокирован"),
+    },
 )
 async def set_role(
     user_id: uuid.UUID, data: RoleUpdateIn, actor: AdminUser, db: DbSession
 ) -> AdminUserOut:
     user = await admin_service.set_role(db, actor, user_id, data.role)
     return AdminUserOut.model_validate(user)
+
+
+# --- Бан (moderator и admin; кто кого — policies.can_ban / can_unban) ----------------------
+
+_BAN_ERRORS = {
+    403: err("Недостаточно прав: роль цели, сам себя или бан, наложенный админом"),
+    404: err("Пользователь не найден"),
+    503: err("Данные пользователя сейчас изменяются — повторить (Retry-After)"),
+}
+
+
+def _ban_out(result: bans_service.BanResult) -> BanOut:
+    u = result.user
+    return BanOut(
+        user_id=u.id,
+        username=u.username,
+        role=u.role,
+        is_banned=u.is_banned,
+        banned_reason=u.banned_reason,
+        banned_by_role=u.banned_by_role,
+        recount_videos=result.recount.videos,
+        recount_channels=result.recount.channels,
+    )
+
+
+@router.put(
+    "/users/{user_id}/ban",
+    response_model=BanOut,
+    summary="Заблокировать пользователя (staff)",
+    description=(
+        "Модератор банит только пользователей, админ — пользователей и модераторов; админа и "
+        "себя забанить нельзя. Контент заблокированного скрывается (видит только staff), "
+        "его реакции, комментарии и подписки исключаются из счётчиков, сессии удаляются."
+    ),
+    responses={**_BAN_ERRORS, 409: err("Пользователь уже заблокирован")},
+)
+async def ban_user(user_id: uuid.UUID, data: BanIn, actor: StaffUser, db: DbSession) -> BanOut:
+    return _ban_out(await bans_service.ban(db, actor, user_id, data.reason))
+
+
+@router.delete(
+    "/users/{user_id}/ban",
+    response_model=BanOut,
+    summary="Разблокировать пользователя (staff)",
+    description="Бан, наложенный админом, снимает только админ. Счётчики пересчитываются.",
+    responses={**_BAN_ERRORS, 409: err("Пользователь не заблокирован")},
+)
+async def unban_user(user_id: uuid.UUID, actor: StaffUser, db: DbSession) -> BanOut:
+    return _ban_out(await bans_service.unban(db, actor, user_id))
 
 
 # --- Модерация (moderator и admin) ----------------------------------------------------------

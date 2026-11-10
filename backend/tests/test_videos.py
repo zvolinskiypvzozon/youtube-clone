@@ -143,7 +143,9 @@ async def test_card_state_only_for_owner_and_staff(client: AsyncClient, db: Asyn
     r = await client.get(f"/api/videos/{video.id}", headers=moderator["auth"])
     assert r.json()["state"]["moderation"] == "hidden"
 
-    await db.execute(update(Video).where(Video.id == video.id).values(moderation=OK))
+    await db.execute(
+        update(Video).where(Video.id == video.id).values(moderation=OK, moderation_reason=None)
+    )
     await db.commit()
     for headers in (stranger["auth"], {}):
         r = await client.get(f"/api/videos/{video.id}", headers=headers)

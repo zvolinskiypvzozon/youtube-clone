@@ -26,6 +26,16 @@ class User(UUIDPk, Timestamps, Base):
     __table_args__ = (
         CheckConstraint("username ~ '^[A-Za-z0-9_]{3,30}$'", name="username_format"),
         CheckConstraint("position('@' in email) > 1", name="email_format"),
+        # Забанен ⇔ есть причина и роль забанившего (её проверяет разбан: бан админа
+        # модератор не снимает). Незабаненный — без причины и роли.
+        CheckConstraint(
+            "(is_banned AND banned_reason IS NOT NULL AND banned_by_role IS NOT NULL)"
+            " OR (NOT is_banned AND banned_reason IS NULL AND banned_by_role IS NULL)",
+            name="ban_consistent",
+        ),
+        CheckConstraint(
+            "char_length(btrim(banned_reason)) BETWEEN 1 AND 500", name="banned_reason_length"
+        ),
     )
 
     # citext: уникальность без учёта регистра (Foo@x.ru и foo@x.ru — один пользователь).
@@ -37,6 +47,8 @@ class User(UUIDPk, Timestamps, Base):
     )
     is_banned: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=false())
     banned_reason: Mapped[str | None] = mapped_column(Text)
+    # Роль того, кто забанил, на момент бана (ADR 0006 доп. 8).
+    banned_by_role: Mapped[UserRole | None] = mapped_column(pg_enum(UserRole, "user_role"))
 
     # passive_deletes: каскад делает БД (ON DELETE CASCADE). Без него ORM при удалении
     # пользователя пытается обнулить channels.owner_id и падает на NOT NULL.

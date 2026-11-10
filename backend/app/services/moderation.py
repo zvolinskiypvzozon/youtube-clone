@@ -52,34 +52,38 @@ async def list_reports(
     await db.commit()  # только чтение
     has_more = len(rows) > limit
     rows = rows[:limit]
-    items = [
-        ReportQueueItem(
-            id=r.id,
-            category=r.category,
-            comment=r.comment,
-            status=r.status,
-            created_at=r.created_at,
-            reporter=(
-                ReporterOut(id=r.reporter_id, username=name)
-                if r.reporter_id is not None and name is not None
-                else None
-            ),
-            video=ReportVideoOut(
-                id=r.video_id,
-                title=r.video_title,
-                channel_handle=r.channel_handle,
-                moderation=v.moderation if v else None,
-                visibility=v.visibility if v else None,
-                status=v.status if v else None,
-            ),
-            resolved_by=r.resolved_by,
-            resolved_at=r.resolved_at,
-        )
-        for r, name, v in rows
-    ]
-    last = rows[-1][0] if rows else None
+    items = [_queue_item(row) for row in rows]
+    last = rows[-1].report if rows else None
     next_cursor = cursor.encode(last.created_at, last.id) if has_more and last else None
     return ReportQueuePage(items=items, next_cursor=next_cursor)
+
+
+def _queue_item(row: moderation_repo.QueueRow) -> ReportQueueItem:
+    r, name, v = row.report, row.reporter_name, row.video
+    return ReportQueueItem(
+        id=r.id,
+        category=r.category,
+        comment=r.comment,
+        status=r.status,
+        created_at=r.created_at,
+        reporter=(
+            ReporterOut(id=r.reporter_id, username=name)
+            if r.reporter_id is not None and name is not None
+            else None
+        ),
+        video=ReportVideoOut(
+            id=r.video_id,
+            title=r.video_title,
+            channel_handle=r.channel_handle,
+            moderation=v.moderation if v else None,
+            visibility=v.visibility if v else None,
+            status=v.status if v else None,
+            owner_id=row.owner_id,
+            owner_banned=row.owner_banned,
+        ),
+        resolved_by=r.resolved_by,
+        resolved_at=r.resolved_at,
+    )
 
 
 async def set_video_moderation(

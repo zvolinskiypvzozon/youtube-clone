@@ -354,6 +354,7 @@ async def test_reaction_rejected_if_hidden_while_waiting(
         locked = await videos_repo.lock_video(session, video.id)
         assert locked is not None
         locked.moderation = HIDDEN
+        locked.moderation_reason = "нарушение"  # CHECK: причина ⇔ скрыто
         await session.commit()
 
     assert await _reaction_waits_for(client, db, hide, owner, video.id) == 409

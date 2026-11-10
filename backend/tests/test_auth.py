@@ -8,10 +8,13 @@ from httpx import AsyncClient
 from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Channel, User, UserSession
+from app.models import Channel, User, UserRole, UserSession
 from tests.helpers import new_user
 
 PASSWORD = "correct-horse-42"
+
+# CHECK ck_users_ban_consistent: забанен ⇔ есть причина и роль забанившего.
+BANNED = {"is_banned": True, "banned_reason": "спам", "banned_by_role": UserRole.admin}
 
 
 def _creds(**overrides: str) -> dict[str, str]:
@@ -133,7 +136,7 @@ async def test_login_does_not_reveal_whether_user_exists(client: AsyncClient) ->
 async def test_banned_user_cannot_login(client: AsyncClient, db: AsyncSession) -> None:
     creds = await _register(client)
     client.cookies.clear()
-    await db.execute(update(User).where(User.username == creds["username"]).values(is_banned=True))
+    await db.execute(update(User).where(User.username == creds["username"]).values(BANNED))
     await db.commit()
     r = await client.post("/api/auth/login", json={"login": creds["email"], "password": PASSWORD})
     assert r.status_code == 403
@@ -144,7 +147,7 @@ async def test_banned_user_existing_session_stops_working(
     client: AsyncClient, db: AsyncSession
 ) -> None:
     creds = await _register(client)
-    await db.execute(update(User).where(User.username == creds["username"]).values(is_banned=True))
+    await db.execute(update(User).where(User.username == creds["username"]).values(BANNED))
     await db.commit()
     assert (await client.get("/api/auth/me")).status_code == 401
 
@@ -156,7 +159,7 @@ async def test_banned_user_bearer_token_stops_working(
     authenticate отказывает ему по любому способу входа, в том числе по Bearer."""
     user = await new_user(client)
     assert (await client.get("/api/auth/me", headers=user["auth"])).status_code == 200
-    await db.execute(update(User).where(User.username == user["username"]).values(is_banned=True))
+    await db.execute(update(User).where(User.username == user["username"]).values(BANNED))
     await db.commit()
     assert (await client.get("/api/auth/me", headers=user["auth"])).status_code == 401
 

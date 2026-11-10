@@ -199,6 +199,12 @@ class CommentOut(BaseModel):
     created_at: datetime
     author: ChannelBrief = Field(description="Канал автора")
     can_delete: bool = Field(description="Текущий пользователь может удалить комментарий")
+    author_user_id: uuid.UUID | None = Field(
+        default=None, description="Пользователь-автор (для бана) — только staff; остальным null"
+    )
+    author_banned: bool | None = Field(
+        default=None, description="Автор заблокирован — только staff; остальным null"
+    )
 
 
 class CommentPage(BaseModel):

@@ -129,6 +129,12 @@ async def login(
         await db.rollback()
         raise Forbidden(ACCOUNT_BANNED)
 
+    # Бан, идущий одновременно со входом: своя строка FOR SHARE (как у комментария, ADR 0006
+    # доп. 8). Бан, начавшийся раньше, — ждём его и отказываем; вход раньше — бан ждёт
+    # commit и удалит и эту сессию. Иначе у забаненного осталась бы живая сессия в БД.
+    if not await users_repo.lock_active(db, user.id):
+        await db.rollback()
+        raise Forbidden(ACCOUNT_BANNED)
     if security.needs_rehash(user.password_hash):
         user.password_hash = await _argon2(security.hash_password, password)
     await _revoke_previous(db, previous_token)

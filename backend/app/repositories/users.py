@@ -68,6 +68,13 @@ async def get_role(db: AsyncSession, user_id: uuid.UUID) -> UserRole | None:
     return await db.scalar(select(User.role).where(User.id == user_id))
 
 
+async def get_active_role(db: AsyncSession, user_id: uuid.UUID) -> UserRole | None:
+    """Роль инициатора, перечитанная под блокировкой смен ролей; None — удалён или забанен
+    (его забанили, пока запрос ждал блокировку: прав больше нет)."""
+    stmt = select(User.role).where(User.id == user_id, User.is_banned.is_(False))
+    return await db.scalar(stmt)
+
+
 async def count_admins(db: AsyncSession) -> int:
     return (
         await db.scalar(select(func.count()).select_from(User).where(User.role == UserRole.admin))
@@ -78,3 +85,37 @@ async def count_admins(db: AsyncSession) -> int:
 async def get_by_username(db: AsyncSession, username: str) -> User | None:
     """citext — без учёта регистра."""
     return await db.scalar(select(User).where(User.username == username))
+
+
+async def lock_active(db: AsyncSession, user_id: uuid.UUID) -> bool:
+    """Своя строка пользователя FOR SHARE, если он не забанен (ADR 0006 доп. 8).
+
+    Берётся первой в комментарии, реакции и подписке — порядок «пользователь → видео/канал»,
+    как у бана. FOR SHARE конфликтует с UPDATE users при бане: бан, начавшийся раньше,
+    заставит запрос дождаться его commit и увидеть is_banned (False → 401); запрос,
+    начавшийся раньше, заставит бан ждать своего commit, и пересчёт счётчиков бана увидит его
+    строку. Без этого строка забаненного могла бы попасть в счётчик мимо пересчёта."""
+    stmt = (
+        select(User.id)
+        .where(User.id == user_id, User.is_banned.is_(False))
+        .with_for_update(read=True)
+    )
+    return await db.scalar(stmt) is not None
+
+
+async def lock_for_ban(db: AsyncSession, user_id: uuid.UUID) -> User | None:
+    """Строка цели бана или смены роли FOR NO KEY UPDATE (вызывать под lock_role_changes);
+    populate_existing — роль и бан перечитываются, даже если объект уже в сессии.
+
+    Не FOR UPDATE: ключ пользователя не меняется, а FOR UPDATE конфликтовал бы с FOR KEY
+    SHARE проверок внешних ключей (жалоба, допуск, журнал, сессия со ссылкой на пользователя)
+    — пути «видео → вставка со ссылкой на пользователя» взаимно блокировались бы с баном
+    «пользователь → видео» (ревью и аудит шага 3). С FOR SHARE из lock_active конфликт
+    остаётся — на нём держится защита счётчиков."""
+    stmt = (
+        select(User)
+        .where(User.id == user_id)
+        .with_for_update(key_share=True)
+        .execution_options(populate_existing=True)
+    )
+    return await db.scalar(stmt)

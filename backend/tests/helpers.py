@@ -202,6 +202,8 @@ async def seed_video(
 ) -> Video:
     video = await create_video(db, channel, visibility=visibility, status=status)
     video.moderation = moderation
+    # CHECK ck_videos_moderation_reason_consistent: причина ⇔ скрыто.
+    video.moderation_reason = "Нарушение правил" if moderation == HIDDEN else None
     if published_at is not None:
         video.published_at = published_at
     if media and status == READY:

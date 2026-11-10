@@ -326,7 +326,11 @@ async def test_delete_under_hidden_video(client: AsyncClient, db: AsyncSession, 
     owner, author = await api_user(client, db), await api_user(client, db)
     video = await seed_video(db, await channel_of(db, owner), PUB)
     comment = await _post(client, author, video.id)
-    await db.execute(update(Video).where(Video.id == video.id).values(moderation=HIDDEN))
+    await db.execute(
+        update(Video)
+        .where(Video.id == video.id)
+        .values(moderation=HIDDEN, moderation_reason="нарушение")
+    )
     await db.commit()
     actor = owner if who == "owner" else author
     assert (await client.delete(_del_url(comment), headers=actor["auth"])).status_code == 204
@@ -398,6 +402,7 @@ async def test_post_rejected_if_hidden_while_waiting(client: AsyncClient, db: As
         locked = await videos_repo.lock_video(session, video.id)
         assert locked is not None
         locked.moderation = HIDDEN
+        locked.moderation_reason = "нарушение"  # CHECK: причина ⇔ скрыто
         await session.commit()
 
     [r] = await waits_for(

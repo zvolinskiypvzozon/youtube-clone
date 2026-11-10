@@ -31,7 +31,7 @@ from app.repositories import comments as comments_repo
 from app.repositories import moderation as moderation_repo
 from app.repositories import videos as videos_repo
 from app.schemas.videos import ChannelBrief, CommentOut, CommentPage
-from app.services import cursor, policies
+from app.services import bans, cursor, policies
 from app.services import videos as videos_service
 
 COMMENT_NOT_FOUND = "Комментарий не найден"
@@ -39,13 +39,24 @@ NOT_COMMENT_OWNER = "Удалить комментарий может тольк
 VIDEO_CHANGING = "Видео сейчас изменяется. Повторите попытку через несколько секунд"
 
 
-def _out(comment: Comment, author: Channel, can_delete: bool) -> CommentOut:
+def _out(
+    comment: Comment,
+    author: Channel,
+    can_delete: bool,
+    *,
+    staff: bool = False,
+    author_banned: bool = False,
+) -> CommentOut:
+    """Автор как пользователь и признак бана — только staff (для бана из модерации);
+    остальным null (решение архитектора 2026-11-10)."""
     return CommentOut(
         id=comment.id,
         body=comment.body,
         created_at=comment.created_at,
         author=ChannelBrief(id=author.id, handle=author.handle, title=author.title),
         can_delete=can_delete,
+        author_user_id=comment.author_id if staff else None,
+        author_banned=author_banned if staff else None,
     )
 
 
@@ -55,20 +66,36 @@ async def list_comments(
     after = cursor.decode(after_cursor) if after_cursor else None
     viewable = await videos_service.get_viewable(db, viewer, video_id)  # can_view, иначе 404
     owner_id = viewable.channel.owner_id
-    rows = await comments_repo.page(db, video_id, after, limit + 1)
+    rows = await comments_repo.page(
+        db,
+        video_id,
+        lambda author_banned: policies.comment_visible_filter(viewer, author_banned),
+        after,
+        limit + 1,
+    )
     has_more = len(rows) > limit
     rows = rows[:limit]
+    staff = policies.is_staff(viewer)
     items = [
-        _out(c, ch, policies.can_delete_comment(viewer, c.author_id, owner_id)) for c, ch in rows
+        _out(
+            r.comment,
+            r.author,
+            policies.can_delete_comment(viewer, r.comment.author_id, owner_id),
+            staff=staff,
+            author_banned=r.author_banned,
+        )
+        for r in rows
     ]
-    last = rows[-1][0] if rows else None
+    last = rows[-1].comment if rows else None
     next_cursor = cursor.encode(last.created_at, last.id) if has_more and last else None
     return CommentPage(items=items, next_cursor=next_cursor)
 
 
 async def add_comment(db: AsyncSession, viewer: User, video_id: uuid.UUID, body: str) -> CommentOut:
     viewable = await videos_service.get_viewable(db, viewer, video_id)  # can_view, иначе 404
-    videos_service.ensure_interactive(viewable.video)  # готово и не скрыто, иначе 409
+    # готово, не скрыто, автор видео не забанен — иначе 409
+    videos_service.ensure_interactive(viewable.video, owner_banned=viewable.owner_banned)
+    await bans.lock_self_active(db, viewer)  # «пользователь → видео», как у бана (доп. 8)
     where = and_(policies.visible_filter(viewer), policies.interactable_filter())
     if not await videos_repo.add_comment_count(db, video_id, +1, where):
         # Пока ждали блокировку, видео удалили, сделали недоступным или скрыли: причина —
@@ -78,7 +105,7 @@ async def add_comment(db: AsyncSession, viewer: User, video_id: uuid.UUID, body:
         # перечиталась, а не взялась из identity map.
         db.expire(viewable.video)
         viewable = await videos_service.get_viewable(db, viewer, video_id)
-        videos_service.ensure_interactive(viewable.video)
+        videos_service.ensure_interactive(viewable.video, owner_banned=viewable.owner_banned)
         raise Busy(VIDEO_CHANGING)
     comment = await comments_repo.create(db, video_id, viewer.id, body)
     author = await channels_repo.get_by_owner(db, viewer.id)
@@ -93,14 +120,21 @@ async def delete_comment(db: AsyncSession, viewer: User, comment_id: uuid.UUID) 
         raise NotFound(COMMENT_NOT_FOUND)
     comment, video_owner_id = found
     video_id = comment.video_id
+    # Комментарий забаненного не-staff не видит — и удаление ведёт себя как с
+    # несуществующим (404), а не 403/204: иначе ответ раскрыл бы скрытый комментарий
+    # (аудит шага 3). Владелец видео удалит его после разбана.
+    if not policies.is_staff(viewer) and await comments_repo.author_banned(db, comment.author_id):
+        raise NotFound(COMMENT_NOT_FOUND)
     if not policies.can_delete_comment(viewer, comment.author_id, video_owner_id):
         # Комментарий виден (видео видно) → 403; не виден → 404 с тем же текстом, что
         # у несуществующего: ответ не раскрывает существование комментария и видео.
         loaded = await videos_repo.get_for_view(db, video_id, viewer.id)
         if loaded is not None:
-            video, channel, has_access = loaded
             facts = policies.VideoFacts.of(
-                video, owner_id=channel.owner_id, viewer_has_access=has_access
+                loaded.video,
+                owner_id=loaded.channel.owner_id,
+                viewer_has_access=loaded.has_access,
+                owner_banned=loaded.owner_banned,
             )
             if policies.can_view(viewer, facts):
                 raise Forbidden(NOT_COMMENT_OWNER)
@@ -114,7 +148,10 @@ async def delete_comment(db: AsyncSession, viewer: User, comment_id: uuid.UUID) 
     if not await comments_repo.remove(db, comment_id):  # параллельное удаление успело раньше
         await db.rollback()
         raise NotFound(COMMENT_NOT_FOUND)
-    await videos_repo.add_comment_count(db, video_id, -1, true())
+    # Комментарий забаненного в счётчике не учтён (бан пересчитал его под этой же
+    # блокировкой видео) — уменьшать нечего.
+    if not await comments_repo.author_banned(db, comment.author_id):
+        await videos_repo.add_comment_count(db, video_id, -1, true())
     # Удалил staff не своё и не под своим видео — модерация, запись в журнал.
     if policies.is_staff(viewer) and viewer.id not in (comment.author_id, video_owner_id):
         await moderation_repo.log(

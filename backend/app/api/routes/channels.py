@@ -33,11 +33,12 @@ async def get_channel(handle: Handle, viewer: OptionalUser, db: DbSession) -> Ch
 )
 async def channel_videos(
     handle: Handle,
+    viewer: OptionalUser,
     db: DbSession,
     cursor: Cursor = None,
     limit: Limit = 24,
 ) -> VideoPage:
-    return await videos_service.channel_videos(db, handle, cursor, limit)
+    return await videos_service.channel_videos(db, viewer, handle, cursor, limit)
 
 
 @router.get(
@@ -63,7 +64,11 @@ _SUBSCRIPTION_ERRORS = {401: err("Требуется вход"), 404: err("Ка�
     "/{handle}/subscription",
     response_model=SubscriptionOut,
     summary="Подписаться на канал (повтор ничего не меняет)",
-    responses={400: err("Нельзя подписаться на свой канал"), **_SUBSCRIPTION_ERRORS},
+    responses={
+        400: err("Нельзя подписаться на свой канал"),
+        **_SUBSCRIPTION_ERRORS,
+        409: err("Автор канала заблокирован (видит только staff)"),
+    },
 )
 async def subscribe(handle: Handle, user: CurrentUser, db: DbSession) -> SubscriptionOut:
     return await subscriptions_service.subscribe(db, user, handle)

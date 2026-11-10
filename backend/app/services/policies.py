@@ -27,6 +27,11 @@ private — только владельцу, staff тоже нет: модера
 — страница канала (только public, для любого зрителя). Состав плейлиста — `visible_filter`
 ТЕКУЩЕГО зрителя; управление — `can_manage`.
 
+Бан (ADR 0006 доп. 8): контент забаненного видит только staff. Видео (`can_view`,
+`visible_filter`, `listed_filter`, `interactable_filter`), канал (`can_view_channel`,
+`channel_visible_filter`), плейлисты (`can_view_playlist`) и комментарии
+(`comment_visible_filter`) — в одном месте, здесь. Кто кого банит — `can_ban`, `can_unban`.
+
 Заблокированный пользователь сюда не попадает: `auth.authenticate` для него возвращает None,
 то есть он — аноним.
 """
@@ -35,6 +40,7 @@ import uuid
 from dataclasses import dataclass
 
 from sqlalchemy import ColumnElement, and_, exists, func, literal_column, or_, select, true
+from sqlalchemy.orm import aliased
 
 from app.models import (
     Channel,
@@ -62,15 +68,19 @@ class VideoFacts:
     status: VideoStatus
     moderation: ModerationState
     viewer_has_access: bool  # зритель в списке допуска (video_access)
+    owner_banned: bool = False  # владелец забанен; в коде — только через `of`
 
     @classmethod
-    def of(cls, video: Video, *, owner_id: uuid.UUID, viewer_has_access: bool) -> "VideoFacts":
+    def of(
+        cls, video: Video, *, owner_id: uuid.UUID, viewer_has_access: bool, owner_banned: bool
+    ) -> "VideoFacts":
         return cls(
             owner_id=owner_id,
             visibility=video.visibility,
             status=video.status,
             moderation=video.moderation,
             viewer_has_access=viewer_has_access,
+            owner_banned=owner_banned,
         )
 
 
@@ -79,7 +89,11 @@ def is_staff(viewer: User | None) -> bool:
 
 
 def can_view(viewer: User | None, facts: VideoFacts) -> bool:
-    if viewer is not None and (viewer.id == facts.owner_id or is_staff(viewer)):
+    if is_staff(viewer):
+        return True
+    if facts.owner_banned:  # видео забаненного — 404 всем, кроме staff (и по допуску)
+        return False
+    if viewer is not None and viewer.id == facts.owner_id:
         return True
     if facts.status != VideoStatus.ready or facts.moderation != ModerationState.ok:
         return False
@@ -88,12 +102,17 @@ def can_view(viewer: User | None, facts: VideoFacts) -> bool:
     return viewer is not None and facts.viewer_has_access
 
 
-def can_interact(video: Video) -> bool:
+def can_interact(video: Video, *, owner_banned: bool) -> bool:
     """Реакции и новые комментарии — публичное взаимодействие: только с готовым и не скрытым
     модератором видео, для любого зрителя, включая владельца и staff (решение архитектора
-    2026-11-09, день 5). Доступ staff к скрытому — для разбора, а не для голосования.
+    2026-11-09, день 5). Доступ staff к скрытому — для разбора, а не для голосования; то же
+    для видео забаненного (staff его видит, но не взаимодействует).
     Проверяется после can_view: кто не может видеть видео, получает 404 раньше."""
-    return video.status == VideoStatus.ready and video.moderation == ModerationState.ok
+    return (
+        video.status == VideoStatus.ready
+        and video.moderation == ModerationState.ok
+        and not owner_banned
+    )
 
 
 def can_delete_comment(
@@ -128,15 +147,55 @@ def can_manage(viewer: User | None, owner_id: uuid.UUID) -> bool:
 
 
 def can_view_playlist(
-    viewer: User | None, owner_id: uuid.UUID, visibility: PlaylistVisibility
+    viewer: User | None,
+    owner_id: uuid.UUID,
+    visibility: PlaylistVisibility,
+    *,
+    owner_banned: bool,
 ) -> bool:
     """Открыть плейлист (карточку и состав): public и unlisted — всем, включая анонима;
     private — только владельцу. Staff приватный плейлист не видит (решение архитектора
-    2026-11-10): модерации плейлистов нет, разбирать там нечего. Какие видео плейлиста
-    увидит зритель — отдельно, `visible_filter(viewer)`."""
+    2026-11-10): модерации плейлистов нет, разбирать там нечего. Плейлист забаненного —
+    только staff (и только не приватный). Какие видео плейлиста увидит зритель — отдельно,
+    `visible_filter(viewer)`."""
+    if owner_banned and not is_staff(viewer):
+        return False
     if visibility != PlaylistVisibility.private:
         return True
     return viewer is not None and viewer.id == owner_id
+
+
+def can_view_channel(viewer: User | None, *, owner_banned: bool) -> bool:
+    """Канал (карточка, видео, плейлисты, подписка): забаненного — только staff, остальным 404
+    (решение архитектора 2026-11-10: одно правило для всего контента забаненного)."""
+    return not owner_banned or is_staff(viewer)
+
+
+def can_ban(
+    actor_id: uuid.UUID, actor_role: UserRole | None, target_id: uuid.UUID, target_role: UserRole
+) -> bool:
+    """Бан (ADR 0006 доп. 8): модератор — только user; админ — user и moderator; админа не
+    банит никто; себя — никто. Все отказы — один код 403. Роли — перечитанные под
+    блокировкой смен ролей, а не из объекта зрителя начала запроса."""
+    if actor_role not in STAFF_ROLES or actor_id == target_id:
+        return False
+    if target_role == UserRole.user:
+        return True
+    return target_role == UserRole.moderator and actor_role == UserRole.admin
+
+
+def can_unban(
+    actor_id: uuid.UUID,
+    actor_role: UserRole | None,
+    target_id: uuid.UUID,
+    target_role: UserRole,
+    banned_by_role: UserRole | None,
+) -> bool:
+    """Разбан — по тем же правилам, что бан, и бан, наложенный админом, снимает только админ
+    (решение архитектора 2026-11-10)."""
+    if not can_ban(actor_id, actor_role, target_id, target_role):
+        return False
+    return banned_by_role != UserRole.admin or actor_role == UserRole.admin
 
 
 # --- SQL ------------------------------------------------------------------------------------
@@ -151,12 +210,27 @@ _MOD_OK = literal_column(f"'{ModerationState.ok.value}'")
 _PLAYLIST_PUBLIC = literal_column(f"'{PlaylistVisibility.public.value}'")
 
 
+def _owner_active(channel_id) -> ColumnElement[bool]:
+    """Владелец канала не забанен. NOT EXISTS по channels → users (PK), без bind-параметров:
+    условие добавляется к предикату частичного ix_videos_feed и не мешает его применять."""
+    # Псевдонимы: внешний запрос сам может соединять channels и users (каталог, очередь
+    # жалоб), и без них подзапрос неявно скоррелировал бы с ними.
+    ch, owner = aliased(Channel), aliased(User)
+    banned_owner = (
+        select(ch.id)
+        .join(owner, owner.id == ch.owner_id)
+        .where(ch.id == channel_id, owner.is_banned.is_(True))
+    )
+    return ~exists(banned_owner)
+
+
 def listed_filter() -> ColumnElement[bool]:
     """Каталог: лента, поиск, канал. Совпадает с предикатом ix_videos_feed."""
     return and_(
         Video.status == _READY,
         Video.visibility == _PUBLIC,
         Video.moderation == _MOD_OK,
+        _owner_active(Video.channel_id),
     )
 
 
@@ -172,11 +246,12 @@ def visible_filter(viewer: User | None) -> ColumnElement[bool]:
         Video.moderation == _MOD_OK,
     )
     not_private = Video.visibility != _PRIVATE
+    active = _owner_active(Video.channel_id)  # видео забаненного — только staff
     if viewer is None:
-        return and_(available, not_private)
+        return and_(active, available, not_private)
     owned = Video.channel_id.in_(select(Channel.id).where(Channel.owner_id == viewer.id))
     granted = exists().where(VideoAccess.video_id == Video.id, VideoAccess.user_id == viewer.id)
-    return or_(owned, and_(available, or_(not_private, granted)))
+    return and_(active, or_(owned, and_(available, or_(not_private, granted))))
 
 
 def owned_filter(viewer: User) -> ColumnElement[bool]:
@@ -209,10 +284,30 @@ def moderation_queue_filter(viewer: User) -> ColumnElement[bool]:
 def interactable_filter() -> ColumnElement[bool]:
     """SQL-аналог can_interact: готово и не скрыто модератором. Для атомарных записей
     (счётчики просмотров и комментариев), где условие проверяется в самом UPDATE."""
-    return and_(Video.status == _READY, Video.moderation == _MOD_OK)
+    return and_(
+        Video.status == _READY, Video.moderation == _MOD_OK, _owner_active(Video.channel_id)
+    )
 
 
 def listed_playlists_filter() -> ColumnElement[bool]:
     """Плейлисты на странице канала: только public, одинаково для любого зрителя, включая
     владельца (все свои — в «Моих плейлистах»). SQL-аналог can_view_playlist для каталога."""
     return Playlist.visibility == _PLAYLIST_PUBLIC
+
+
+def channel_visible_filter(viewer: User | None) -> ColumnElement[bool]:
+    """SQL-аналог can_view_channel для списков каналов («Мои подписки»): каналы забаненных —
+    только staff."""
+    if is_staff(viewer):
+        return true()
+    return _owner_active(Channel.id)
+
+
+def comment_visible_filter(
+    viewer: User | None, author_banned: ColumnElement[bool]
+) -> ColumnElement[bool]:
+    """Комментарии забаненного скрыты из выдачи для всех, кроме staff (staff видит их
+    с пометкой author_banned). `author_banned` — столбец users.is_banned автора из запроса."""
+    if is_staff(viewer):
+        return true()
+    return author_banned.is_(False)

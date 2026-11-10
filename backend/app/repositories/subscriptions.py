@@ -4,7 +4,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import delete, exists, select, tuple_
+from sqlalchemy import ColumnElement, delete, exists, select, tuple_
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -43,15 +43,17 @@ async def is_subscribed(db: AsyncSession, channel_id: uuid.UUID, user_id: uuid.U
 async def page_of_user(
     db: AsyncSession,
     user_id: uuid.UUID,
+    visible: ColumnElement[bool],
     after: tuple[datetime, uuid.UUID] | None,
     limit: int,
 ) -> list[tuple[Subscription, Channel]]:
     """Подписки пользователя с каналами, новые сверху, keyset по (created_at, channel_id);
-    индекс ix_subscriptions_user_created."""
+    индекс ix_subscriptions_user_created. `visible` — policies.channel_visible_filter
+    (каналы забаненных — только staff)."""
     stmt = (
         select(Subscription, Channel)
         .join(Channel, Channel.id == Subscription.channel_id)
-        .where(Subscription.user_id == user_id)
+        .where(Subscription.user_id == user_id, visible)
         .order_by(Subscription.created_at.desc(), Subscription.channel_id.desc())
         .limit(limit)
     )

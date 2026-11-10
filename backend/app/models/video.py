@@ -48,6 +48,15 @@ class Video(UUIDPk, Timestamps, Base):
         ),
         # published_at — момент первой публикации (готово и не приватно); дальше не меняется.
         CheckConstraint("published_at IS NULL OR status = 'ready'", name="published_only_if_ready"),
+        # Причина модерации есть ровно у скрытого видео; её видит владелец.
+        CheckConstraint(
+            "(moderation = 'hidden') = (moderation_reason IS NOT NULL)",
+            name="moderation_reason_consistent",
+        ),
+        CheckConstraint(
+            "char_length(btrim(moderation_reason)) BETWEEN 1 AND 500",
+            name="moderation_reason_length",
+        ),
         # Лента главной: только готовые публичные не скрытые, новые сверху.
         # id — tie-breaker для стабильной keyset-пагинации (published_at, id) < (…).
         Index(

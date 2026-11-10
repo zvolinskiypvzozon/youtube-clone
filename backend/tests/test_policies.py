@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import (
     Channel,
     ModerationState,
+    PlaylistVisibility,
     User,
     UserRole,
     Video,
@@ -39,6 +40,7 @@ UPL, PROC, READY, FAIL = (
     VideoStatus.failed,
 )
 OK, HIDDEN = ModerationState.ok, ModerationState.hidden
+PL_PUB, PL_PRIV = PlaylistVisibility.public, PlaylistVisibility.private
 
 Combo = tuple[VideoVisibility, VideoStatus, ModerationState]
 ALL: frozenset[Combo] = frozenset(itertools.product(VideoVisibility, VideoStatus, ModerationState))
@@ -73,6 +75,18 @@ EXPECTED_STRANGER_CHANNEL: dict[str, frozenset[Combo]] = {
 }
 
 
+# Видео канала забаненного: только staff — и владельцу (он аноним), и по допуску — ничего
+# (ADR 0006 доп. 8). У "granted" допуск ко всем видео забаненного.
+EXPECTED_BANNED_CHANNEL: dict[str, frozenset[Combo]] = {
+    "anon": frozenset(),
+    "stranger": frozenset(),
+    "granted": frozenset(),
+    "owner": frozenset(),
+    "moderator": ALL,
+    "admin": ALL,
+}
+
+
 # --- Чистая функция -------------------------------------------------------------------------
 
 
@@ -102,6 +116,90 @@ def test_can_view_matrix(viewer_kind: str, combo: Combo) -> None:
     )
     expected = combo in EXPECTED_OWNER_CHANNEL[viewer_kind]
     assert policies.can_view(viewers[viewer_kind], facts) is expected
+
+
+@pytest.mark.parametrize("viewer_kind", VIEWERS)
+@pytest.mark.parametrize("combo", sorted(ALL), ids=lambda c: "-".join(map(str, c)))
+def test_can_view_banned_owner_matrix(viewer_kind: str, combo: Combo) -> None:
+    """Владелец забанен: видит только staff (сам владелец — тоже нет: его сессии удалены,
+    но и при живом объекте User правило не пропускает)."""
+    owner = _user()
+    viewers: dict[str, User | None] = {
+        "anon": None,
+        "stranger": _user(),
+        "granted": _user(),
+        "owner": owner,
+        "moderator": _user(UserRole.moderator),
+        "admin": _user(UserRole.admin),
+    }
+    facts = VideoFacts(
+        owner.id, *combo, viewer_has_access=viewer_kind == "granted", owner_banned=True
+    )
+    expected = combo in EXPECTED_BANNED_CHANNEL[viewer_kind]
+    assert policies.can_view(viewers[viewer_kind], facts) is expected
+
+
+A, M, U = UserRole.admin, UserRole.moderator, UserRole.user
+
+
+@pytest.mark.parametrize(
+    ("actor", "target", "expected"),
+    [
+        (M, U, True),
+        (M, M, False),
+        (M, A, False),
+        (A, U, True),
+        (A, M, True),
+        (A, A, False),
+        (U, U, False),
+        (None, U, False),  # роль не найдена (инициатор удалён)
+    ],
+)
+def test_can_ban_roles(actor: UserRole | None, target: UserRole, expected: bool) -> None:
+    assert policies.can_ban(uuid.uuid4(), actor, uuid.uuid4(), target) is expected
+
+
+@pytest.mark.parametrize("role", list(UserRole))
+def test_cannot_ban_self(role: UserRole) -> None:
+    me = uuid.uuid4()
+    assert policies.can_ban(me, role, me, role) is False
+    assert policies.can_unban(me, role, me, role, UserRole.admin) is False
+
+
+@pytest.mark.parametrize(
+    ("actor", "target", "banned_by", "expected"),
+    [
+        (M, U, M, True),
+        (M, U, A, False),  # бан админа модератор не снимает
+        (A, U, A, True),
+        (A, U, M, True),
+        (A, M, A, True),
+        (M, M, A, False),
+        (U, U, M, False),
+    ],
+)
+def test_can_unban(actor: UserRole, target: UserRole, banned_by: UserRole, expected: bool) -> None:
+    assert policies.can_unban(uuid.uuid4(), actor, uuid.uuid4(), target, banned_by) is expected
+
+
+def test_banned_channel_and_playlist() -> None:
+    owner, stranger = _user(), _user()
+    staff = [_user(UserRole.moderator), _user(UserRole.admin)]
+    for viewer in (None, stranger, owner):
+        assert policies.can_view_channel(viewer, owner_banned=True) is False
+        assert policies.can_view_playlist(viewer, owner.id, PL_PUB, owner_banned=True) is False
+        assert policies.can_view_channel(viewer, owner_banned=False) is True
+    for viewer in staff:
+        assert policies.can_view_channel(viewer, owner_banned=True) is True
+        assert policies.can_view_playlist(viewer, owner.id, PL_PUB, owner_banned=True) is True
+        # Приватный плейлист — только владелец, и для staff при бане тоже.
+        assert policies.can_view_playlist(viewer, owner.id, PL_PRIV, owner_banned=True) is False
+
+
+def test_cannot_interact_with_banned_owner_video() -> None:
+    video = Video(status=READY, moderation=OK, visibility=PUB)
+    assert policies.can_interact(video, owner_banned=False) is True
+    assert policies.can_interact(video, owner_banned=True) is False
 
 
 def test_anonymous_never_sees_private_even_with_access_flag() -> None:
@@ -144,7 +242,11 @@ class World:
     videos: dict[uuid.UUID, tuple[str, Combo]]
 
     def expected(self, viewer_kind: str) -> set[uuid.UUID]:
-        tables = {"owner": EXPECTED_OWNER_CHANNEL, "stranger": EXPECTED_STRANGER_CHANNEL}
+        tables = {
+            "owner": EXPECTED_OWNER_CHANNEL,
+            "stranger": EXPECTED_STRANGER_CHANNEL,
+            "banned": EXPECTED_BANNED_CHANNEL,
+        }
         return {
             vid
             for vid, (channel, combo) in self.videos.items()
@@ -161,6 +263,7 @@ async def _all_combos(db: AsyncSession, channel: Channel) -> dict[uuid.UUID, Com
     for visibility, status, moderation in sorted(ALL):
         video = await create_video(db, channel, visibility=visibility, status=status)
         video.moderation = moderation
+        video.moderation_reason = "нарушение" if moderation == HIDDEN else None  # CHECK
         result[video.id] = (visibility, status, moderation)
     await db.flush()
     return result
@@ -179,9 +282,15 @@ async def world(db: AsyncSession) -> World:
     videos |= {vid: ("owner", c) for vid, c in own.items()}
     foreign = await _all_combos(db, await _channel(db, stranger))
     videos |= {vid: ("stranger", c) for vid, c in foreign.items()}
+    # Третий канал — забаненного: его видео видит только staff (ADR 0006 доп. 8).
+    banned = await create_user(db)
+    of_banned = await _all_combos(db, await _channel(db, banned))
+    videos |= {vid: ("banned", c) for vid, c in of_banned.items()}
+    banned.is_banned, banned.banned_reason, banned.banned_by_role = True, "спам", UserRole.admin
 
-    # Допуск только к видео владельца — к видео постороннего "granted" не допущен.
-    db.add_all(VideoAccess(video_id=vid, user_id=granted.id) for vid in own)
+    # Допуск к видео владельца и забаненного — к видео постороннего "granted" не допущен.
+    # Допуск к видео забаненного не помогает.
+    db.add_all(VideoAccess(video_id=vid, user_id=granted.id) for vid in [*own, *of_banned])
     await db.commit()
     # expire_on_commit=False: без этого get_for_view вернул бы объекты из identity map
     # с атрибутами фикстуры, а не прочитанные из БД.
@@ -215,8 +324,12 @@ async def test_can_view_on_loaded_facts_matrix(
     for vid in world.videos:
         loaded = await videos_repo.get_for_view(db, vid, viewer.id if viewer else None)
         assert loaded is not None
-        video, channel, has_access = loaded
-        facts = VideoFacts.of(video, owner_id=channel.owner_id, viewer_has_access=has_access)
+        facts = VideoFacts.of(
+            loaded.video,
+            owner_id=loaded.channel.owner_id,
+            viewer_has_access=loaded.has_access,
+            owner_banned=loaded.owner_banned,
+        )
         if policies.can_view(viewer, facts):
             allowed.add(vid)
     assert allowed == world.expected(viewer_kind)
@@ -225,17 +338,22 @@ async def test_can_view_on_loaded_facts_matrix(
 async def test_listed_filter_is_catalog_only(db: AsyncSession, world: World) -> None:
     # От зрителя не зависит по сигнатуре: каталог одинаков для всех, включая владельца и staff.
     found = set(await db.scalars(select(Video.id).where(policies.listed_filter())))
-    assert found == {vid for vid, (_, combo) in world.videos.items() if combo in LISTED}
-    assert len(found) == 2  # по одному на каждый канал
+    assert found == {
+        vid for vid, (ch, combo) in world.videos.items() if combo in LISTED and ch != "banned"
+    }
+    assert len(found) == 2  # по одному на каналы владельца и постороннего, у забаненного — нет
 
 
 async def test_get_for_view_access_flag_is_per_viewer(db: AsyncSession, world: World) -> None:
     vid = next(v for v, (ch, c) in world.videos.items() if ch == "owner" and c == (PRIV, READY, OK))
     granted, stranger = world.viewers["granted"], world.viewers["stranger"]
     assert granted is not None and stranger is not None
-    assert (await videos_repo.get_for_view(db, vid, granted.id))[2] is True
-    assert (await videos_repo.get_for_view(db, vid, stranger.id))[2] is False
-    assert (await videos_repo.get_for_view(db, vid, None))[2] is False
+    assert (await videos_repo.get_for_view(db, vid, granted.id)).has_access is True
+    assert (await videos_repo.get_for_view(db, vid, stranger.id)).has_access is False
+    assert (await videos_repo.get_for_view(db, vid, None)).has_access is False
+    assert (await videos_repo.get_for_view(db, vid, None)).owner_banned is False
+    banned_vid = next(v for v, (ch, _) in world.videos.items() if ch == "banned")
+    assert (await videos_repo.get_for_view(db, banned_vid, None)).owner_banned is True
 
 
 async def test_get_for_view_missing_video(db: AsyncSession) -> None:

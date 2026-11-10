@@ -36,7 +36,8 @@ async def create_report(
     viewable = await videos_service.get_viewable(db, viewer, video_id)  # can_view, иначе 404
     if viewable.channel.owner_id == viewer.id:
         raise BadRequest(SELF_REPORT)
-    videos_service.ensure_interactive(viewable.video)  # готово и не скрыто, иначе 409
+    # готово, не скрыто, автор видео не забанен — иначе 409
+    videos_service.ensure_interactive(viewable.video, owner_banned=viewable.owner_banned)
     # Повтор — отказ без блокировки строки видео: иначе поток повторных жалоб держал бы
     # FOR SHARE и не давал скрыть, править или удалить видео (аудит шага 4, Medium).
     if await reports_repo.has_open(db, video_id, viewer.id):
@@ -49,7 +50,7 @@ async def create_report(
         # по свежему состоянию (404 или 409); если оно уже вернулось обратно — повторить.
         db.expire(viewable.video)
         viewable = await videos_service.get_viewable(db, viewer, video_id)
-        videos_service.ensure_interactive(viewable.video)
+        videos_service.ensure_interactive(viewable.video, owner_banned=viewable.owner_banned)
         raise Busy(VIDEO_CHANGING)
     video, channel = locked
 

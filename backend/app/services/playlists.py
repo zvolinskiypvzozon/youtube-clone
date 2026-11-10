@@ -41,7 +41,7 @@ from app.schemas.playlists import (
 )
 from app.services import cursor, policies
 from app.services import videos as videos_service
-from app.services.videos import CHANNEL_NOT_FOUND, VIDEO_NOT_FOUND
+from app.services.videos import VIDEO_NOT_FOUND
 
 PLAYLIST_NOT_FOUND = "Плейлист не найден"
 NOT_OWNER = "Изменять плейлист может только его владелец"
@@ -71,8 +71,10 @@ async def get_viewable(
     loaded = await playlists_repo.get_with_channel(db, playlist_id)
     if loaded is None:
         raise NotFound(PLAYLIST_NOT_FOUND)
-    playlist, channel = loaded
-    if not policies.can_view_playlist(viewer, channel.owner_id, playlist.visibility):
+    playlist, channel, owner_banned = loaded
+    if not policies.can_view_playlist(
+        viewer, channel.owner_id, playlist.visibility, owner_banned=owner_banned
+    ):
         raise NotFound(PLAYLIST_NOT_FOUND)
     return ViewablePlaylist(playlist, channel)
 
@@ -295,10 +297,9 @@ async def channel_playlists(
     db: AsyncSession, viewer: User | None, handle: str, after_cursor: str | None, limit: int
 ) -> PlaylistPage:
     """Страница канала: только public (listed_playlists_filter), одинаково для любого
-    зрителя, включая владельца. Число видео и превью — по видео, видимым зрителю."""
-    channel = await channels_repo.get_by_handle(db, handle)
-    if channel is None:
-        raise NotFound(CHANNEL_NOT_FOUND)
+    зрителя, включая владельца. Число видео и превью — по видео, видимым зрителю. Канал
+    забаненного — 404 (кроме staff)."""
+    channel = await videos_service.get_viewable_channel(db, viewer, handle)  # забанен → 404
     return await _page(db, viewer, channel.id, own=False, after_cursor=after_cursor, limit=limit)
 
 

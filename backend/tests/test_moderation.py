@@ -153,6 +153,8 @@ async def test_queue_contents_and_snapshot(client: AsyncClient, db: AsyncSession
         "moderation": "ok",
         "visibility": "public",
         "status": "ready",
+        "owner_id": owner["id"],  # для бана из очереди (ADR 0006 доп. 8)
+        "owner_banned": False,
     }
     assert item["resolved_by"] is None and item["resolved_at"] is None
     assert r.headers["cache-control"] == "no-store"
@@ -178,6 +180,8 @@ async def test_queue_after_video_deleted(client: AsyncClient, db: AsyncSession) 
         "moderation": None,
         "visibility": None,
         "status": None,
+        "owner_id": None,
+        "owner_banned": None,
     }
 
 
@@ -585,6 +589,7 @@ async def test_staff_deletes_comment_with_log(
             .values(
                 visibility=PRIV if state == "private" else PUB,
                 moderation=HIDDEN if state == "hidden" else ModerationState.ok,
+                moderation_reason="нарушение" if state == "hidden" else None,
             )
         )
         await db.commit()

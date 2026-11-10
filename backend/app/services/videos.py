@@ -39,12 +39,18 @@ VIDEO_NOT_FOUND = "Видео не найдено"
 CHANNEL_NOT_FOUND = "Канал не найден"
 NOT_READY = "Видео ещё не обработано"
 HIDDEN_NO_INTERACTION = "Видео скрыто модератором: реакции и комментарии недоступны"
+OWNER_BANNED_NO_INTERACTION = "Автор видео заблокирован: реакции и комментарии недоступны"
 
 
-def ensure_interactive(video: Video) -> None:
+def ensure_interactive(video: Video, *, owner_banned: bool) -> None:
     """policies.can_interact с понятной причиной отказа (409) для тех, кто видео видит."""
-    if not policies.can_interact(video):
-        raise Conflict(NOT_READY if video.status != VideoStatus.ready else HIDDEN_NO_INTERACTION)
+    if policies.can_interact(video, owner_banned=owner_banned):
+        return
+    if video.status != VideoStatus.ready:
+        raise Conflict(NOT_READY)
+    if owner_banned:  # видит только staff
+        raise Conflict(OWNER_BANNED_NO_INTERACTION)
+    raise Conflict(HIDDEN_NO_INTERACTION)
 
 
 # Качества потока, лучшее первым.
@@ -55,6 +61,7 @@ QUALITIES = {VideoFileKind.mp4_720: "720p", VideoFileKind.mp4_360: "360p"}
 class Viewable:
     video: Video
     channel: Channel
+    owner_banned: bool  # видеть может только staff (can_view это уже проверил)
 
 
 async def get_viewable(db: AsyncSession, viewer: User | None, video_id: uuid.UUID) -> Viewable:
@@ -62,11 +69,34 @@ async def get_viewable(db: AsyncSession, viewer: User | None, video_id: uuid.UUI
     loaded = await videos_repo.get_for_view(db, video_id, viewer.id if viewer else None)
     if loaded is None:
         raise NotFound(VIDEO_NOT_FOUND)
-    video, channel, has_access = loaded
-    facts = policies.VideoFacts.of(video, owner_id=channel.owner_id, viewer_has_access=has_access)
+    facts = policies.VideoFacts.of(
+        loaded.video,
+        owner_id=loaded.channel.owner_id,
+        viewer_has_access=loaded.has_access,
+        owner_banned=loaded.owner_banned,
+    )
     if not policies.can_view(viewer, facts):
         raise NotFound(VIDEO_NOT_FOUND)
-    return Viewable(video, channel)
+    return Viewable(loaded.video, loaded.channel, loaded.owner_banned)
+
+
+async def viewable_channel(
+    db: AsyncSession, viewer: User | None, handle: str
+) -> tuple[Channel, bool]:
+    """Единственная точка входа к каналу по нику: нет канала или владелец забанен (для
+    не-staff) → 404 (policies.can_view_channel). Второе значение — «владелец забанен»
+    (его видит только staff)."""
+    found = await channels_repo.get_by_handle_with_ban(db, handle)
+    if found is None:
+        raise NotFound(CHANNEL_NOT_FOUND)
+    channel, owner_banned = found
+    if not policies.can_view_channel(viewer, owner_banned=owner_banned):
+        raise NotFound(CHANNEL_NOT_FOUND)
+    return channel, owner_banned
+
+
+async def get_viewable_channel(db: AsyncSession, viewer: User | None, handle: str) -> Channel:
+    return (await viewable_channel(db, viewer, handle))[0]
 
 
 async def sign_objects(objects: list[tuple[str, str]]) -> list[str]:
@@ -206,9 +236,7 @@ async def feed(
 async def get_channel(db: AsyncSession, viewer: User | None, handle: str) -> ChannelOut:
     """Канал: публичные данные и счётчик подписчиков (кто подписан — не отдаётся);
     `subscribed` — только про текущего пользователя, null для анонима."""
-    channel = await channels_repo.get_by_handle(db, handle)
-    if channel is None:
-        raise NotFound(CHANNEL_NOT_FOUND)
+    channel = await get_viewable_channel(db, viewer, handle)
     subscribed = (
         await subscriptions_repo.is_subscribed(db, channel.id, viewer.id)
         if viewer is not None
@@ -226,12 +254,11 @@ async def get_channel(db: AsyncSession, viewer: User | None, handle: str) -> Cha
 
 
 async def channel_videos(
-    db: AsyncSession, handle: str, after_cursor: str | None, limit: int
+    db: AsyncSession, viewer: User | None, handle: str, after_cursor: str | None, limit: int
 ) -> VideoPage:
-    """Видео канала: тот же каталог — владелец свои приватные видит в «Моих видео»."""
-    channel = await channels_repo.get_by_handle(db, handle)
-    if channel is None:
-        raise NotFound(CHANNEL_NOT_FOUND)
+    """Видео канала: тот же каталог — владелец свои приватные видит в «Моих видео». Канал
+    забаненного — 404 (для staff — пустой каталог: listed_filter одинаков для всех)."""
+    channel = await get_viewable_channel(db, viewer, handle)
     return await _catalog(db, after_cursor, limit, channel_id=channel.id)
 
 

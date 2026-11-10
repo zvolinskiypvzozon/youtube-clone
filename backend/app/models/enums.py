@@ -64,8 +64,9 @@ class ModerationAction(StrEnum):
     video_unhide = "video_unhide"
     comment_delete = "comment_delete"
     report_dismiss = "report_dismiss"
-    user_ban = "user_ban"  # день 6, шаг 3
+    user_ban = "user_ban"
     user_unban = "user_unban"
+    role_change = "role_change"  # смена роли администратором
 
 
 class JobType(StrEnum):

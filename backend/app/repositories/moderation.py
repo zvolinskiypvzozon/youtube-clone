@@ -5,11 +5,13 @@
 """
 
 import uuid
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
 from sqlalchemy import ColumnElement, func, insert, select, tuple_, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from app.models import (
     Channel,
@@ -22,27 +24,39 @@ from app.models import (
 )
 
 
+@dataclass(frozen=True)
+class QueueRow:
+    report: Report
+    reporter_name: str | None
+    video: Video | None
+    owner_id: uuid.UUID | None  # владелец видео (для бана из очереди)
+    owner_banned: bool | None
+
+
 async def queue_page(
     db: AsyncSession,
     visible: ColumnElement[bool],
     status: ReportStatus,
     after: tuple[datetime, uuid.UUID] | None,
     limit: int,
-) -> list[tuple[Report, str | None, Video | None]]:
+) -> list[QueueRow]:
     """Жалобы со статусом `status`, видимые staff-зрителю (`visible` — из policies), новые
     сверху, keyset по (created_at, id); индекс ix_reports_status_created. К жалобе — ник
-    пожаловавшегося и текущее видео (None — пользователь или видео удалены)."""
+    пожаловавшегося, текущее видео и его владелец (None — пользователь или видео удалены)."""
+    owner = aliased(User)
     stmt = (
-        select(Report, User.username, Video)
+        select(Report, User.username, Video, Channel.owner_id, owner.is_banned)
         .outerjoin(User, User.id == Report.reporter_id)
         .outerjoin(Video, Video.id == Report.video_id)
+        .outerjoin(Channel, Channel.id == Video.channel_id)
+        .outerjoin(owner, owner.id == Channel.owner_id)
         .where(Report.status == status, visible)
         .order_by(Report.created_at.desc(), Report.id.desc())
         .limit(limit)
     )
     if after is not None:
         stmt = stmt.where(tuple_(Report.created_at, Report.id) < tuple_(*after))
-    return [(r, name, v) for r, name, v in (await db.execute(stmt)).all()]
+    return [QueueRow(*row) for row in (await db.execute(stmt)).all()]
 
 
 async def get_report(db: AsyncSession, report_id: uuid.UUID) -> Report | None:

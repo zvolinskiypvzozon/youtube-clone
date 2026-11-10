@@ -47,7 +47,7 @@ async def get_manageable(db: AsyncSession, viewer: User, video_id: uuid.UUID) ->
     video = await videos_repo.lock_for_edit(db, video_id)
     if video is None:  # удалено между проверкой и блокировкой
         raise NotFound(VIDEO_NOT_FOUND)
-    return Viewable(video, viewable.channel)
+    return Viewable(video, viewable.channel, viewable.owner_banned)
 
 
 async def update_video(

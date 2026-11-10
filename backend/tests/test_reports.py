@@ -275,6 +275,7 @@ async def test_rejected_if_hidden_while_waiting(
         locked = await videos_repo.lock_for_edit(session, video.id)
         assert locked is not None
         locked.moderation = HIDDEN
+        locked.moderation_reason = "нарушение"  # CHECK: причина ⇔ скрыто
         await session.commit()
 
     [r] = await waits_for(
