@@ -13,8 +13,8 @@ PostgreSQL 17. Схема ведётся миграциями Alembic (`backend/
 | `feae87d73a60` reactions | reactions (лайк/дизлайк) | 5 |
 | `685d115152a1` comments | comments (плоские, без правки) | 5 |
 | `6507f3ac93de` subscriptions | subscriptions (подписки на каналы) | 5 |
-| — | playlists, playlist_items | 6 |
 | `3c6f18f885c5` reports and moderation log | reports (жалобы со снимком видео), moderation_log (журнал staff) | 6 |
+| `020f33bca74b` playlists and playlist items | playlists, playlist_items (только свои видео канала) | 6 |
 | — | watch_history | 8–9 |
 
 ## ER-диаграмма (текущая)
@@ -37,6 +37,9 @@ erDiagram
     videos |o--o{ reports : "жалобы (SET NULL при удалении)"
     users |o--o{ reports : "жалуется"
     users |o--o{ moderation_log : "действует (staff)"
+    channels ||--o{ playlists : "плейлисты"
+    playlists ||--o{ playlist_items : "состав"
+    videos ||--o{ playlist_items : "в плейлистах"
 
     users {
         uuid id PK
@@ -63,6 +66,21 @@ erDiagram
         uuid channel_id PK,FK
         uuid user_id PK,FK
         timestamptz created_at
+    }
+    playlists {
+        uuid id PK
+        uuid channel_id FK
+        varchar title "1–150 после btrim"
+        text description "до 5000"
+        playlist_visibility visibility "public | unlisted | private"
+        timestamptz created_at
+        timestamptz updated_at "и при изменении состава"
+    }
+    playlist_items {
+        uuid playlist_id PK,FK
+        uuid video_id PK,FK
+        int position "UK с playlist_id, ≥ 1, с пропусками"
+        timestamptz added_at
     }
     sessions {
         uuid id PK
@@ -225,6 +243,9 @@ lease не перезапишет результат того, кто перех
 | `uq_reports_open_video_reporter` (частичный уникальный индекс, `WHERE status = 'open'`) | Одна открытая жалоба пользователя на видео: параллельные дубли отсекает БД. После закрытия жалобы можно пожаловаться снова |
 | `ck_reports_resolved_consistent` | Жалоба открыта тогда и только тогда, когда у неё нет `resolved_at` |
 | `ck_reports_comment_length`, `ck_moderation_log_reason_length` | Текст жалобы и причина действия — до 500 символов |
+| `ck_playlists_title_length`, `ck_playlists_description_length` | Название плейлиста 1–150 символов после обрезки пробелов, описание до 5000 |
+| `pk_playlist_items (playlist_id, video_id)` | Видео в плейлисте один раз: повторное добавление — 200 без изменений (`ON CONFLICT DO NOTHING`) |
+| `uq_playlist_items_playlist_position`, `ck_playlist_items_position_positive` | Позиция уникальна в плейлисте и ≥ 1 (порядок и keyset-пагинация). Вторая защита к блокировке строки плейлиста: две вставки с одинаковым `max + 1` не пройдут |
 
 **Каскады.** Удаление пользователя удаляет его канал, видео, сессии, записи допуска и задачи
 (`ON DELETE CASCADE`). В ORM у связей `passive_deletes=True`: каскад выполняет БД. Без этого
@@ -237,6 +258,12 @@ ORM пытался бы обнулить внешний ключ и упирал
 и при создании жалобы (ADR 0006 доп. 6). `moderation_log` ссылается на цель без внешнего
 ключа: журнал переживает удаление видео, комментария, пользователя; удаление staff обнуляет
 `actor_id` и `resolved_by` (`SET NULL`) — без индекса: удаление staff редкое (день 9).
+Плейлисты: удаление канала (пользователя) удаляет его плейлисты, удаление плейлиста или
+видео — элементы (`ON DELETE CASCADE`). Счётчика видео у плейлиста нет — число считается
+запросом по видео, видимым зрителю (`visible_filter`), поэтому бан и удаление пользователя
+ничего у плейлистов не пересчитывают. Удаление видео строк `playlists` не блокирует (удаление
+ссылающейся строки родителя не трогает); добавление в плейлист берёт «плейлист → видео»
+(ADR 0006 доп. 7) — цикла нет.
 Объекты в хранилище при удалении видео удаляет приложение (после коммита), так как БД
 о хранилище не знает; остатки при сбое хранилища убирает maintenance.
 
@@ -271,6 +298,9 @@ API — 5 с, worker — 30 с.
 | `SET NULL` при удалении видео — все его жалобы, и закрытые тоже | `ix_reports_video (video_id)` |
 | `SET NULL` при удалении пользователя (день 9) | `ix_reports_reporter (reporter_id)` |
 | История действий над целью (видео, пользователь), новые сверху | `ix_moderation_log_target_created (target_id, created_at DESC)` |
+| Плейлисты канала и «Мои плейлисты», новые сверху (keyset по `(created_at, id)`); лимит 200 на канал | `ix_playlists_channel_created (channel_id, created_at DESC, id DESC)` |
+| Состав плейлиста по порядку (keyset по `position`); `max(position)` и лимит 5000 при добавлении | `uq_playlist_items_playlist_position (playlist_id, position)` |
+| Каскад при удалении видео → его элементы плейлистов | `ix_playlist_items_video (video_id)` (PK начинается с `playlist_id`) |
 
 ## Отложено (зафиксировано по итогам ревью схемы)
 

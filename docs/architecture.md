@@ -90,6 +90,14 @@ flowchart LR
 | `PUT /api/channels/{handle}/subscription` / `DELETE …/subscription` | Подписаться / отписаться (идемпотентно); в ответе `{subscribed, subscribers_count}` | вход; свой канал → 400; неизвестный → 404. Подписка не влияет на доступ к видео |
 | `GET /api/me/subscriptions?cursor=&limit=` | Мои подписки: каналы, новые сверху (keyset по `created_at, channel_id`). Лента видео подписок — день 9 | вход; только свои (параметра «чей список» нет) |
 | `GET /api/me/videos?cursor=&limit=` | «Мои видео»: свои видео в любом статусе со `state`, новые загрузки сверху (keyset по `created_at, id`) | вход; только свой канал (`owned_filter`), и для staff |
+| `POST /api/playlists` `{title, description?, visibility}` | Создать плейлист (название 1–150, описание до 5000, NUL → 422); 201. Лимит 200 на канал → 409 | вход |
+| `GET /api/playlists/{id}` | Карточка: название, описание, канал, `video_count` и превью — по видео, доступным зрителю; `visibility` — только владельцу; `can_manage` | `can_view_playlist`: public/unlisted — всем, private — только владельцу (staff тоже 404) |
+| `GET /api/playlists/{id}/videos?cursor=&limit=` | Состав по порядку (keyset по `position`); недоступные зрителю видео не показываются; `state` — владельцу видео и staff | `can_view_playlist` → 404; видео — `visible_filter` текущего зрителя (K4) |
+| `PATCH /api/playlists/{id}` / `DELETE /api/playlists/{id}` | Правка (хотя бы одно поле) / удаление (элементы каскадом, видео не затрагиваются) | владелец (`can_manage`); не может открыть → 404, может → 403, аноним → 401 |
+| `PUT /api/playlists/{id}/videos/{video_id}` | Добавить **своё** видео (в любом статусе) в конец: 201, уже было — 200. Лимит 5000 → 409 | как `PATCH`; чужое видео: видит — 403, не видит — 404 |
+| `DELETE /api/playlists/{id}/videos/{video_id}` | Убрать видео; идемпотентно, 204 | как `PATCH` |
+| `GET /api/channels/{handle}/playlists?cursor=&limit=` | Плейлисты канала, новые сверху | только `public` (`listed_playlists_filter`), одинаково для всех |
+| `GET /api/me/playlists?cursor=&limit=&video_id=` | Мои плейлисты со `visibility`; с `video_id` — `contains_video` (меню «Сохранить в плейлист») | вход; только свои |
 
 ### Модерация (staff: moderator и admin; аноним → 401, остальные → 403)
 
@@ -105,9 +113,10 @@ flowchart LR
 в `moderation_log` со снимком цели. Порядок блокировок «видео → жалобы» — ADR 0006 доп. 6.
 
 Списки — keyset-пагинация по `(момент времени, id)` — `published_at` в каталоге, `created_at`
-в «Моих видео» — с непрозрачным курсором (`next_cursor = null`
+в «Моих видео», плейлистах канала и «Моих плейлистах»; состав плейлиста — по `position` —
+с непрозрачным курсором (`next_cursor = null`
 на последней странице), `limit` 1–50. Все ответы — `Cache-Control: no-store`: в них подписанные
-ссылки. Правила доступа — ADR 0006 и дополнения 1–6.
+ссылки. Правила доступа — ADR 0006 и дополнения 1–7 (плейлисты — доп. 7).
 
 Подробности решений описаны в ADR: `docs/adr/`.
 
