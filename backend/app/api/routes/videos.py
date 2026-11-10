@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, Query, Response, status
 
 from app.api.deps import CurrentUser, Cursor, DbSession, Limit, OptionalUser, no_store
 from app.schemas.common import err
+from app.schemas.moderation import ReportCreatedOut, ReportIn
 from app.schemas.videos import (
     AccessEntryOut,
     AccessGrantIn,
@@ -23,6 +24,7 @@ from app.schemas.videos import (
 from app.services import comments as comments_service
 from app.services import manage as manage_service
 from app.services import reactions as reactions_service
+from app.services import reports as reports_service
 from app.services import videos as videos_service
 
 # Ответы содержат подписанные ссылки и зависят от зрителя — не кэшируются.
@@ -225,3 +227,23 @@ async def add_comment(
     video_id: uuid.UUID, data: CommentIn, user: CurrentUser, db: DbSession
 ) -> CommentOut:
     return await comments_service.add_comment(db, user, video_id, data.body)
+
+
+@router.post(
+    "/{video_id}/reports",
+    response_model=ReportCreatedOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Пожаловаться на видео (категория и необязательное пояснение)",
+    description="Жалобы видит только модерация; владелец видео не узнаёт, кто пожаловался.",
+    responses={
+        400: err("Жалоба на своё видео"),
+        401: err("Требуется вход"),
+        404: err("Видео не найдено или нет доступа"),
+        409: err("Видео не обработано, уже скрыто или жалоба уже отправлена"),
+        503: err("Видео сейчас изменяется — повторить (Retry-After)"),
+    },
+)
+async def create_report(
+    video_id: uuid.UUID, data: ReportIn, user: CurrentUser, db: DbSession
+) -> ReportCreatedOut:
+    return await reports_service.create_report(db, user, video_id, data)

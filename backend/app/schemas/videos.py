@@ -12,6 +12,7 @@ from pydantic import (
 )
 
 from app.models import ModerationState, ReactionKind, VideoStatus, VideoVisibility
+from app.schemas.common import no_nul
 from app.schemas.uploads import Title
 
 
@@ -168,13 +169,6 @@ class ReactionOut(BaseModel):
     dislikes_count: int
 
 
-def _no_nul(value: str) -> str:
-    # NUL в text Postgres не принимает — без этой проверки был бы 500 (как в аудите 3b).
-    if "\x00" in value:
-        raise ValueError("Текст не может содержать NUL-символ")
-    return value
-
-
 COMMENT_MAX = 2000
 SEARCH_MAX = 100
 
@@ -182,14 +176,14 @@ SEARCH_MAX = 100
 SearchQuery = Annotated[
     str,
     StringConstraints(strip_whitespace=True, min_length=1, max_length=SEARCH_MAX),
-    AfterValidator(_no_nul),
+    AfterValidator(no_nul),
 ]
 
 # Длина — после обрезки пробелов по краям, как в CHECK body_length.
 CommentBody = Annotated[
     str,
     StringConstraints(strip_whitespace=True, min_length=1, max_length=COMMENT_MAX),
-    AfterValidator(_no_nul),
+    AfterValidator(no_nul),
 ]
 
 
