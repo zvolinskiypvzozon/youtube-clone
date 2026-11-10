@@ -16,6 +16,7 @@ PostgreSQL 17. Схема ведётся миграциями Alembic (`backend/
 | `3c6f18f885c5` reports and moderation log | reports (жалобы со снимком видео), moderation_log (журнал staff) | 6 |
 | `020f33bca74b` playlists and playlist items | playlists, playlist_items (только свои видео канала) | 6 |
 | `ef599b78e7c1` ban constraints and role_change action | `users.banned_by_role`, CHECK бана и причины модерации, `moderation_action.role_change` | 6 |
+| `538a0286b0f3` partial index of open reports per reporter | `ix_reports_reporter_open` — потолок открытых жалоб | 6 |
 | — | watch_history | 8–9 |
 
 ## ER-диаграмма (текущая)
@@ -276,6 +277,8 @@ ORM пытался бы обнулить внешний ключ и упирал
 
 **`lock_timeout`** задаётся на соединение (`server_settings` движка, `DB_LOCK_TIMEOUT_MS`):
 API — 5 с, worker — 30 с.
+**`statement_timeout`** — так же (`DB_STATEMENT_TIMEOUT_MS`): API — 5 с (→ 503), бан и разбан —
+30 с (`SET LOCAL` в своей транзакции), worker — без предела, alembic — свой движок без него.
 
 **Связи в ORM** — `lazy="raise"`. Случайное обращение к незагруженной связи в async-коде
 сразу даёт явную ошибку, а не скрытый запрос с `MissingGreenlet` в проде. Связи загружаются
@@ -304,6 +307,7 @@ API — 5 с, worker — 30 с.
 | Открытые жалобы видео: закрытие при скрытии | `uq_reports_open_video_reporter (video_id, reporter_id) WHERE status = 'open'` |
 | `SET NULL` при удалении видео — все его жалобы, и закрытые тоже | `ix_reports_video (video_id)` |
 | `SET NULL` при удалении пользователя (день 9) | `ix_reports_reporter (reporter_id)` |
+| Потолок 20 открытых жалоб пользователя (подсчёт под блокировкой его строки) | `ix_reports_reporter_open (reporter_id) WHERE status = 'open'` — читается не больше 20 строк, а не вся история |
 | История действий над целью (видео, пользователь), новые сверху | `ix_moderation_log_target_created (target_id, created_at DESC)` |
 | Плейлисты канала и «Мои плейлисты», новые сверху (keyset по `(created_at, id)`); лимит 200 на канал | `ix_playlists_channel_created (channel_id, created_at DESC, id DESC)` |
 | Состав плейлиста по порядку (keyset по `position`); `max(position)` и лимит 5000 при добавлении | `uq_playlist_items_playlist_position (playlist_id, position)` |
