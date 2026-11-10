@@ -4,9 +4,10 @@
 import asyncio
 import time
 import uuid
+from collections.abc import Awaitable, Callable
 from datetime import datetime
 
-from httpx import AsyncClient
+from httpx import AsyncClient, Response
 from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -112,6 +113,33 @@ async def wait_for_lock_queue(blocker_pid: int, count: int) -> None:
             if time.monotonic() > deadline:
                 raise AssertionError(f"в очереди за {blocker_pid}: {len(queued)}, нужно {count}")
             await asyncio.sleep(0.02)
+
+
+async def waits_for(
+    holder: Callable[[AsyncSession], Awaitable[object]],
+    requests: list[Callable[[], Awaitable[Response]]],
+) -> list[Response]:
+    """Держатель (настоящий сервис или прямая правка в своей сессии, commit придержан)
+    блокирует строку видео; запросы встают в ожидание блокировки и выполняются после его
+    commit. Возвращает ответы запросов."""
+    holding, release = asyncio.Event(), asyncio.Event()
+    async with get_sessionmaker()() as holder_db:
+        holder_pid = await backend_pid(holder_db)
+        real_commit = holder_db.commit
+
+        async def gated_commit() -> None:
+            holding.set()
+            await release.wait()
+            await real_commit()
+
+        holder_db.commit = gated_commit  # type: ignore[method-assign]
+        task = asyncio.create_task(holder(holder_db))
+        await asyncio.wait_for(holding.wait(), timeout=5)
+        waiting = [asyncio.create_task(make()) for make in requests]
+        await wait_for_lock_queue(holder_pid, count=len(requests))
+        release.set()
+        await task
+        return [await r for r in waiting]
 
 
 # --- Видео: состояния и подготовка данных ------------------------------------------------

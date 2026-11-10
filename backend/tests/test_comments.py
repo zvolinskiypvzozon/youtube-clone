@@ -8,14 +8,12 @@
 
 import asyncio
 import uuid
-from collections.abc import Awaitable, Callable
 
 import pytest
 from httpx import AsyncClient, Response
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.db import get_sessionmaker
 from app.models import Comment, User, UserRole, Video, VideoAccess
 from app.repositories import videos as videos_repo
 from app.schemas.videos import VideoUpdateIn
@@ -31,11 +29,10 @@ from tests.helpers import (
     PUB,
     api_user,
     auth_headers,
-    backend_pid,
     channel_of,
     manage_matrix,
     seed_video,
-    wait_for_lock_queue,
+    waits_for,
 )
 
 NOT_READY_STATES = {"processing", "failed"}
@@ -369,33 +366,6 @@ async def test_concurrent_posts_are_not_lost(client: AsyncClient, db: AsyncSessi
     assert await _count(db, video.id) == (20, 20)
 
 
-async def _waits_for(
-    holder: Callable[[AsyncSession], Awaitable[object]],
-    requests: list[Callable[[], Awaitable[Response]]],
-) -> list[Response]:
-    """Держатель (настоящий сервис или прямая правка в своей сессии, commit придержан)
-    блокирует строку видео; запросы встают в ожидание блокировки и выполняются после его
-    commit. Возвращает ответы запросов."""
-    holding, release = asyncio.Event(), asyncio.Event()
-    async with get_sessionmaker()() as holder_db:
-        holder_pid = await backend_pid(holder_db)
-        real_commit = holder_db.commit
-
-        async def gated_commit() -> None:
-            holding.set()
-            await release.wait()
-            await real_commit()
-
-        holder_db.commit = gated_commit  # type: ignore[method-assign]
-        task = asyncio.create_task(holder(holder_db))
-        await asyncio.wait_for(holding.wait(), timeout=5)
-        waiting = [asyncio.create_task(make()) for make in requests]
-        await wait_for_lock_queue(holder_pid, count=len(requests))
-        release.set()
-        await task
-        return [await r for r in waiting]
-
-
 async def test_post_rejected_if_made_private_while_waiting(
     client: AsyncClient, db: AsyncSession
 ) -> None:
@@ -411,7 +381,7 @@ async def test_post_rejected_if_made_private_while_waiting(
             session, me, video.id, VideoUpdateIn(visibility=PRIV)
         )
 
-    [r] = await _waits_for(
+    [r] = await waits_for(
         make_private,
         [lambda: client.post(_url(video.id), json={"body": "x"}, headers=stranger["auth"])],
     )
@@ -431,7 +401,7 @@ async def test_post_rejected_if_hidden_while_waiting(client: AsyncClient, db: As
         locked.moderation = HIDDEN
         await session.commit()
 
-    [r] = await _waits_for(
+    [r] = await waits_for(
         hide, [lambda: client.post(_url(video.id), json={"body": "x"}, headers=owner["auth"])]
     )
     assert r.status_code == 409, r.text
@@ -447,7 +417,7 @@ async def test_post_on_video_deleted_while_waiting(client: AsyncClient, db: Asyn
         me = await session.get(User, uuid.UUID(owner["id"]))
         await manage_service.delete_video(session, me, video.id)
 
-    [r] = await _waits_for(
+    [r] = await waits_for(
         delete_video,
         [lambda: client.post(_url(video.id), json={"body": "x"}, headers=user["auth"])],
     )
@@ -467,7 +437,7 @@ async def test_concurrent_deletes_decrement_once(client: AsyncClient, db: AsyncS
         assert await videos_repo.lock_for_edit(session, video.id) is not None
         await session.commit()
 
-    rs = await _waits_for(
+    rs = await waits_for(
         hold,
         [
             lambda: client.delete(_del_url(comment), headers=author["auth"]),
@@ -489,7 +459,7 @@ async def test_delete_comment_while_video_deleted(client: AsyncClient, db: Async
         me = await session.get(User, uuid.UUID(owner["id"]))
         await manage_service.delete_video(session, me, video.id)
 
-    [r] = await _waits_for(
+    [r] = await waits_for(
         delete_video, [lambda: client.delete(_del_url(comment), headers=author["auth"])]
     )
     assert r.status_code == 404, r.text
