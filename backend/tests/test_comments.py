@@ -249,8 +249,8 @@ async def test_can_delete_flags(client: AsyncClient, db: AsyncSession) -> None:
     }
     moderator = await api_user(client, db, UserRole.moderator)
     assert flags(await client.get(_url(video.id), headers=moderator["auth"])) == {
-        "автор": False,  # staff удаляет через модерацию дня 6
-        "другой": False,
+        "автор": True,  # staff удаляет любой (модерация, с записью в журнал)
+        "другой": True,
     }
 
 
@@ -268,12 +268,11 @@ async def test_author_and_video_owner_delete(client: AsyncClient, db: AsyncSessi
     assert await _count(db, video.id) == (0, 0)
 
 
-@pytest.mark.parametrize("role", [UserRole.user, UserRole.moderator, UserRole.admin])
-async def test_visible_but_not_allowed_is_403(
-    client: AsyncClient, db: AsyncSession, role: UserRole
-) -> None:
+async def test_visible_but_not_allowed_is_403(client: AsyncClient, db: AsyncSession) -> None:
+    """Посторонний user видит комментарий, но не автор и не владелец видео — 403. Staff
+    удаляет любой (test_moderation)."""
     owner, author = await api_user(client, db), await api_user(client, db)
-    actor = await api_user(client, db, role)
+    actor = await api_user(client, db)
     video = await seed_video(db, await channel_of(db, owner), PUB)
     comment = await _post(client, author, video.id)
     r = await client.delete(_del_url(comment), headers=actor["auth"])

@@ -5,8 +5,8 @@
     разбирают его вместе с комментариями);
   - писать — `can_view` (404), затем `can_interact` (409): под скрытым и не готовым видео
     не пишет никто, включая владельца и staff;
-  - удалять — `can_delete_comment`: автор или владелец видео. Не виден комментарий → 404,
-    виден, но прав нет → 403.
+  - удалять — `can_delete_comment`: автор, владелец видео или staff (модерация: запись
+    в moderation_log со снимком текста). Не виден комментарий → 404, виден, но прав нет → 403.
 
 Счётчик `videos.comments_count`:
   - добавление — атомарный UPDATE с условиями политики в самом запросе (visible_filter +
@@ -25,16 +25,17 @@ from sqlalchemy import and_, true
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import Busy, Forbidden, NotFound
-from app.models import Channel, Comment, User
+from app.models import Channel, Comment, ModerationAction, User
 from app.repositories import channels as channels_repo
 from app.repositories import comments as comments_repo
+from app.repositories import moderation as moderation_repo
 from app.repositories import videos as videos_repo
 from app.schemas.videos import ChannelBrief, CommentOut, CommentPage
 from app.services import cursor, policies
 from app.services import videos as videos_service
 
 COMMENT_NOT_FOUND = "Комментарий не найден"
-NOT_COMMENT_OWNER = "Удалить комментарий может только его автор или владелец видео"
+NOT_COMMENT_OWNER = "Удалить комментарий может только его автор, владелец видео или модератор"
 VIDEO_CHANGING = "Видео сейчас изменяется. Повторите попытку через несколько секунд"
 
 
@@ -114,4 +115,17 @@ async def delete_comment(db: AsyncSession, viewer: User, comment_id: uuid.UUID) 
         await db.rollback()
         raise NotFound(COMMENT_NOT_FOUND)
     await videos_repo.add_comment_count(db, video_id, -1, true())
+    # Удалил staff не своё и не под своим видео — модерация, запись в журнал.
+    if policies.is_staff(viewer) and viewer.id not in (comment.author_id, video_owner_id):
+        await moderation_repo.log(
+            db,
+            actor_id=viewer.id,
+            action=ModerationAction.comment_delete,
+            target_id=comment_id,
+            details={
+                "video_id": str(video_id),
+                "author_id": str(comment.author_id),
+                "body": comment.body,
+            },
+        )
     await db.commit()

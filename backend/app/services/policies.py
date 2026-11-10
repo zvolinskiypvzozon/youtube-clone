@@ -14,7 +14,7 @@
 Плюс `can_manage(viewer, owner_id)` — правка, допуск, удаление: только владелец, и
 `owned_filter(viewer)` — его SQL-аналог для «Моих видео» (все свои видео в любом статусе).
 `can_interact(video)` / `interactable_filter()` — реакции, новые комментарии, просмотры;
-`can_delete_comment(viewer, author_id, video_owner_id)` — автор или владелец видео.
+`can_delete_comment(viewer, author_id, video_owner_id)` — автор, владелец видео или staff.
 
 Кто видит одно видео (`can_view`):
   - владелец, модератор, админ — всегда (скрытое и необработанное тоже);
@@ -29,11 +29,12 @@
 import uuid
 from dataclasses import dataclass
 
-from sqlalchemy import ColumnElement, and_, exists, literal_column, or_, select, true
+from sqlalchemy import ColumnElement, and_, exists, func, literal_column, or_, select, true
 
 from app.models import (
     Channel,
     ModerationState,
+    Report,
     User,
     UserRole,
     Video,
@@ -91,10 +92,20 @@ def can_interact(video: Video) -> bool:
 def can_delete_comment(
     viewer: User | None, author_id: uuid.UUID, video_owner_id: uuid.UUID
 ) -> bool:
-    """Удалить комментарий: автор (даже потеряв доступ к приватному видео — это его данные)
-    или владелец видео (под своим видео — любой). Под скрытым видео тоже: удаление контента —
-    не взаимодействие. Staff — через модерацию дня 6, не здесь (ADR 0006 доп. 5)."""
-    return viewer is not None and viewer.id in (author_id, video_owner_id)
+    """Удалить комментарий: автор (даже потеряв доступ к приватному видео — это его данные),
+    владелец видео (под своим видео — любой) или staff (модерация, с записью в журнал —
+    ADR 0006 доп. 5 и 6). Под скрытым видео тоже: удаление контента — не взаимодействие."""
+    return viewer is not None and (viewer.id in (author_id, video_owner_id) or is_staff(viewer))
+
+
+def can_moderate(viewer: User | None, owner_id: uuid.UUID | None) -> bool:
+    """Модерировать видео (скрыть, вернуть, отклонить жалобу на него, видеть жалобы в очереди):
+    staff. Модератор — только чужое: по своему видео он узнал бы автора жалобы и судил бы сам
+    себя. Админ — любое, действие пишется в журнал (решение архитектора 2026-11-10,
+    ADR 0006 доп. 6). owner_id None — владелец неизвестен (канал удалён): не своё."""
+    if viewer is None or not is_staff(viewer):
+        return False
+    return viewer.role == UserRole.admin or viewer.id != owner_id
 
 
 def sees_internal_state(viewer: User | None, owner_id: uuid.UUID) -> bool:
@@ -156,6 +167,23 @@ def owned_filter(viewer: User) -> ColumnElement[bool]:
     один раз (InitPlan) и читает ix_videos_channel_created в порядке выдачи."""
     own_channel = select(Channel.id).where(Channel.owner_id == viewer.id).scalar_subquery()
     return Video.channel_id == own_channel
+
+
+def moderation_queue_filter(viewer: User) -> ColumnElement[bool]:
+    """SQL-аналог can_moderate для очереди жалоб (Report внешне соединён с Video): админ видит
+    все; модератор — кроме жалоб на свои видео. Для удалённого видео (video_id NULL) свой —
+    по снимку handle канала (handle неизменяем)."""
+    if viewer.role == UserRole.admin:
+        return true()
+    own_channel = select(Channel.id).where(Channel.owner_id == viewer.id).scalar_subquery()
+    own_handle = select(Channel.handle).where(Channel.owner_id == viewer.id).scalar_subquery()
+    return or_(
+        and_(Report.video_id.is_not(None), Video.channel_id.is_distinct_from(own_channel)),
+        and_(
+            Report.video_id.is_(None),
+            func.lower(Report.channel_handle).is_distinct_from(func.lower(own_handle)),
+        ),
+    )
 
 
 def interactable_filter() -> ColumnElement[bool]:
