@@ -222,7 +222,7 @@ API — 5 с, worker — 30 с.
 | Лента главной: готовые публичные не скрытые, новые сверху | `ix_videos_feed` — частичный по `(published_at DESC, id DESC)` (`id` — tie-breaker для keyset-пагинации) с `WHERE status='ready' AND visibility='public' AND moderation='ok'`. Скрытые и приватные в индекс не попадают |
 | Видео канала | `ix_videos_channel_published (channel_id, published_at DESC, id DESC)` |
 | «Мои видео»: все видео своего канала в любом статусе, новые загрузки сверху | `ix_videos_channel_created (channel_id, created_at DESC, id DESC)`; условие — равенство со скалярным подзапросом канала (`policies.owned_filter`), порядок берётся из индекса без сортировки (тест плана) |
-| Поиск по названию (`ILIKE '%…%'`) | `ix_videos_title_trgm` — GIN `gin_trgm_ops`: подстрока без учёта регистра, без полного сканирования |
+| Поиск по названию (`ILIKE '%…%' ESCAPE '\'`, ввод экранируется в `repositories/videos.escape_like`) | `ix_videos_title_trgm` — GIN `gin_trgm_ops` или `ix_videos_feed` в порядке выдачи с фильтром — выбирает planner (тест: без Seq Scan). Запросы короче 3 символов триграммы не ускоряют: идёт `ix_videos_feed` до `limit` — на объёме задания приемлемо |
 | Сессия по токену из cookie | `uq_sessions_token_hash` |
 | Очистка просроченных сессий | `ix_sessions_expires_at` |
 | Следующая задача для worker | `ix_jobs_queued (run_after) WHERE status='queued'` |
@@ -239,7 +239,6 @@ API — 5 с, worker — 30 с.
 | Пункт | Когда |
 |---|---|
 | Удаление видео или пользователя: сначала собрать ключи объектов из `video_files`, затем удалить строки и объекты в хранилище. Каскад в БД ключи теряет. Worker должен корректно обрабатывать удаление видео во время транскода и удалять уже загруженные объекты | день 3 (worker), день 6 (модерация, удаление) |
-| Поиск: запросы короче 3 символов триграммный индекс не ускоряет; `%` и `_` во вводе экранировать в репозитории | день 5 (поиск) |
 | Очередь: возврат задач с истёкшим lease двумя UPDATE (`attempts < max_attempts` → queued, иначе → failed) и тесты на fencing | день 3 (worker) |
 
 ## Роли
