@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api.routes import admin, auth, channels, comments, health, me, uploads, videos
+from app.api.routes import admin, auth, channels, comments, health, me, playlists, uploads, videos
 
 api_router = APIRouter(prefix="/api")
 api_router.include_router(health.router)
@@ -11,3 +11,4 @@ api_router.include_router(videos.router)
 api_router.include_router(channels.router)
 api_router.include_router(comments.router)
 api_router.include_router(me.router)
+api_router.include_router(playlists.router)

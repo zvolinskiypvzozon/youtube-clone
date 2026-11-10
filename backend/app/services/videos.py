@@ -69,15 +69,26 @@ async def get_viewable(db: AsyncSession, viewer: User | None, video_id: uuid.UUI
     return Viewable(video, channel)
 
 
-async def _sign(objects: list[tuple[str, str]]) -> list[str]:
+async def sign_objects(objects: list[tuple[str, str]]) -> list[str]:
     if not objects:
         return []
     ttl = get_settings().stream_url_ttl_seconds
     return await asyncio.to_thread(storage.presign_get_many, objects, ttl)
 
 
-def _brief(channel: Channel) -> ChannelBrief:
+def channel_brief(channel: Channel) -> ChannelBrief:
     return ChannelBrief(id=channel.id, handle=channel.handle, title=channel.title)
+
+
+def video_state(video: Video) -> VideoStateOut:
+    """Служебное состояние — отдавать только при policies.sees_internal_state."""
+    return VideoStateOut(
+        status=video.status,
+        visibility=video.visibility,
+        moderation=video.moderation,
+        moderation_reason=video.moderation_reason,
+        failure_reason=video.failure_reason,
+    )
 
 
 async def card(db: AsyncSession, viewer: User | None, video_id: uuid.UUID) -> VideoCardOut:
@@ -88,21 +99,15 @@ async def card(db: AsyncSession, viewer: User | None, video_id: uuid.UUID) -> Vi
         for f in await videos_repo.files_of(db, video.id)
         if f.kind == VideoFileKind.thumbnail
     ]
-    thumbnail_url = (await _sign(thumbs) or [None])[0]
+    thumbnail_url = (await sign_objects(thumbs) or [None])[0]
     state = None
     if policies.sees_internal_state(viewer, v.channel.owner_id):
-        state = VideoStateOut(
-            status=video.status,
-            visibility=video.visibility,
-            moderation=video.moderation,
-            moderation_reason=video.moderation_reason,
-            failure_reason=video.failure_reason,
-        )
+        state = video_state(video)
     return VideoCardOut(
         id=video.id,
         title=video.title,
         description=video.description,
-        channel=_brief(v.channel),
+        channel=channel_brief(v.channel),
         duration_seconds=video.duration_seconds,
         views_count=video.views_count,
         likes_count=video.likes_count,
@@ -130,7 +135,7 @@ async def stream(db: AsyncSession, viewer: User | None, video_id: uuid.UUID) -> 
     objects = [(f.bucket, f.s3_key) for f in variants]
     if thumb is not None:
         objects.append((thumb.bucket, thumb.s3_key))
-    urls = await _sign(objects)
+    urls = await sign_objects(objects)
     return VideoStreamOut(
         video_id=v.video.id,
         sources=[
@@ -167,12 +172,12 @@ async def _catalog(
     has_more = len(rows) > limit
     rows = rows[:limit]
     thumbs = [r.thumbnail for r in rows if r.thumbnail is not None]
-    signed = iter(await _sign(thumbs))
+    signed = iter(await sign_objects(thumbs))
     items = [
         VideoListItem(
             id=r.video.id,
             title=r.video.title,
-            channel=_brief(r.channel),
+            channel=channel_brief(r.channel),
             duration_seconds=r.video.duration_seconds,
             views_count=r.video.views_count,
             published_at=r.video.published_at,
@@ -238,7 +243,7 @@ async def my_videos(
     rows = await videos_repo.own_page(db, policies.owned_filter(viewer), after, limit + 1)
     has_more = len(rows) > limit
     rows = rows[:limit]
-    signed = iter(await _sign([thumb for _, thumb in rows if thumb is not None]))
+    signed = iter(await sign_objects([thumb for _, thumb in rows if thumb is not None]))
     items = [
         MyVideoItem(
             id=video.id,
@@ -248,13 +253,7 @@ async def my_videos(
             created_at=video.created_at,
             published_at=video.published_at,
             thumbnail_url=next(signed) if thumb is not None else None,
-            state=VideoStateOut(
-                status=video.status,
-                visibility=video.visibility,
-                moderation=video.moderation,
-                moderation_reason=video.moderation_reason,
-                failure_reason=video.failure_reason,
-            ),
+            state=video_state(video),
         )
         for video, thumb in rows
     ]

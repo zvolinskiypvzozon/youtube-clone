@@ -1,5 +1,5 @@
 """Непрозрачный курсор keyset-пагинации по (момент времени, id): published_at в каталоге,
-created_at в «Моих видео».
+created_at в «Моих видео» и списках плейлистов; по позиции — в составе плейлиста.
 
 Клиент не должен строить курсор сам: формат — деталь реализации. Любой битый курсор → 400.
 """
@@ -30,4 +30,30 @@ def decode(cursor: str) -> tuple[datetime, uuid.UUID]:
         # переполняются при переводе в UTC — это 400, а не 500 из asyncpg.
         return published_at.astimezone(UTC), uuid.UUID(vid)
     except (ValueError, OverflowError, binascii.Error, UnicodeDecodeError) as exc:
+        raise BadRequest(BAD_CURSOR) from exc
+
+
+# Состав плейлиста: keyset по позиции (целое, уникально в плейлисте).
+_POSITION_PREFIX = "p|"
+_POSITION_MAX = 2**31 - 1  # integer в Postgres
+
+
+def encode_position(position: int) -> str:
+    raw = f"{_POSITION_PREFIX}{position}".encode()
+    return base64.urlsafe_b64encode(raw).decode().rstrip("=")
+
+
+def decode_position(cursor: str) -> int:
+    try:
+        raw = base64.urlsafe_b64decode(cursor + "=" * (-len(cursor) % 4)).decode()
+        if not raw.startswith(_POSITION_PREFIX):
+            raise ValueError("не курсор позиции")
+        digits = raw.removeprefix(_POSITION_PREFIX)
+        if not digits.isascii() or not digits.isdigit():
+            raise ValueError("позиция — только цифры")
+        position = int(digits)
+        if position > _POSITION_MAX:
+            raise ValueError("за пределами integer")
+        return position
+    except (ValueError, binascii.Error, UnicodeDecodeError) as exc:
         raise BadRequest(BAD_CURSOR) from exc

@@ -4,7 +4,9 @@ from fastapi import APIRouter, Depends, Path
 
 from app.api.deps import CurrentUser, Cursor, DbSession, Limit, OptionalUser, no_store
 from app.schemas.common import err
+from app.schemas.playlists import PlaylistPage
 from app.schemas.videos import ChannelOut, SubscriptionOut, VideoPage
+from app.services import playlists as playlists_service
 from app.services import subscriptions as subscriptions_service
 from app.services import videos as videos_service
 
@@ -36,6 +38,22 @@ async def channel_videos(
     limit: Limit = 24,
 ) -> VideoPage:
     return await videos_service.channel_videos(db, handle, cursor, limit)
+
+
+@router.get(
+    "/{handle}/playlists",
+    response_model=PlaylistPage,
+    summary="Плейлисты канала: только открытые, новые сверху",
+    responses={400: err("Некорректный курсор"), 404: err("Канал не найден")},
+)
+async def channel_playlists(
+    handle: Handle,
+    viewer: OptionalUser,
+    db: DbSession,
+    cursor: Cursor = None,
+    limit: Limit = 24,
+) -> PlaylistPage:
+    return await playlists_service.channel_playlists(db, viewer, handle, cursor, limit)
 
 
 _SUBSCRIPTION_ERRORS = {401: err("Требуется вход"), 404: err("Канал не найден")}

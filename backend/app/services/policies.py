@@ -22,6 +22,11 @@
     public/unlisted — всем, включая анонима; private — только из списка допуска.
 Отказ вызывающий превращает в 404, а не 403: факт существования не раскрывается.
 
+Плейлисты (ADR 0006 доп. 7): `can_view_playlist` — открыть плейлист (public/unlisted — всем,
+private — только владельцу, staff тоже нет: модерации плейлистов нет), `listed_playlists_filter`
+— страница канала (только public, для любого зрителя). Состав плейлиста — `visible_filter`
+ТЕКУЩЕГО зрителя; управление — `can_manage`.
+
 Заблокированный пользователь сюда не попадает: `auth.authenticate` для него возвращает None,
 то есть он — аноним.
 """
@@ -34,6 +39,8 @@ from sqlalchemy import ColumnElement, and_, exists, func, literal_column, or_, s
 from app.models import (
     Channel,
     ModerationState,
+    Playlist,
+    PlaylistVisibility,
     Report,
     User,
     UserRole,
@@ -120,6 +127,18 @@ def can_manage(viewer: User | None, owner_id: uuid.UUID) -> bool:
     return viewer is not None and viewer.id == owner_id
 
 
+def can_view_playlist(
+    viewer: User | None, owner_id: uuid.UUID, visibility: PlaylistVisibility
+) -> bool:
+    """Открыть плейлист (карточку и состав): public и unlisted — всем, включая анонима;
+    private — только владельцу. Staff приватный плейлист не видит (решение архитектора
+    2026-11-10): модерации плейлистов нет, разбирать там нечего. Какие видео плейлиста
+    увидит зритель — отдельно, `visible_filter(viewer)`."""
+    if visibility != PlaylistVisibility.private:
+        return True
+    return viewer is not None and viewer.id == owner_id
+
+
 # --- SQL ------------------------------------------------------------------------------------
 # Константы — SQL-литералы, а не bind-параметры: условие каталога должно совпасть
 # с предикатом частичного индекса ix_videos_feed. С параметрами ($1) generic-план
@@ -129,6 +148,7 @@ _READY = literal_column(f"'{VideoStatus.ready.value}'")
 _PUBLIC = literal_column(f"'{VideoVisibility.public.value}'")
 _PRIVATE = literal_column(f"'{VideoVisibility.private.value}'")
 _MOD_OK = literal_column(f"'{ModerationState.ok.value}'")
+_PLAYLIST_PUBLIC = literal_column(f"'{PlaylistVisibility.public.value}'")
 
 
 def listed_filter() -> ColumnElement[bool]:
@@ -190,3 +210,9 @@ def interactable_filter() -> ColumnElement[bool]:
     """SQL-аналог can_interact: готово и не скрыто модератором. Для атомарных записей
     (счётчики просмотров и комментариев), где условие проверяется в самом UPDATE."""
     return and_(Video.status == _READY, Video.moderation == _MOD_OK)
+
+
+def listed_playlists_filter() -> ColumnElement[bool]:
+    """Плейлисты на странице канала: только public, одинаково для любого зрителя, включая
+    владельца (все свои — в «Моих плейлистах»). SQL-аналог can_view_playlist для каталога."""
+    return Playlist.visibility == _PLAYLIST_PUBLIC
