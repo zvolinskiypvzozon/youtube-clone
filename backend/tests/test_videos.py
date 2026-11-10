@@ -373,7 +373,7 @@ async def test_channel_videos_only_catalog_of_that_channel(
 async def test_feed_uses_partial_index(db: AsyncSession, with_cursor: bool) -> None:
     after = (datetime.now(UTC), uuid.uuid4()) if with_cursor else None
     stmt = videos_repo.catalog_page_stmt(policies.listed_filter(), after, 25)
-    plan = await generic_plan(db, stmt)
+    plan = await generic_plan(db, stmt, no_sort=True)
     assert "ix_videos_feed" in plan, plan
 
 

@@ -234,7 +234,7 @@ def manage_expected(viewer_kind: str, state: str) -> int:
 # --- Планы запросов ------------------------------------------------------------------------
 
 
-async def generic_plan(db: AsyncSession, stmt) -> str:
+async def generic_plan(db: AsyncSession, stmt, *, no_sort: bool = False) -> str:
     """Generic plan запроса — так asyncpg выполняет prepared statement после нескольких
     вызовов. Seq scan выключен: на маленькой таблице он дешевле индекса, а проверяем, что
     индекс ПРИМЕНИМ к условию. PREPARE идёт простым протоколом (без параметров на проводе),
@@ -247,6 +247,10 @@ async def generic_plan(db: AsyncSession, stmt) -> str:
     raw = (await conn.get_raw_connection()).driver_connection
     assert await raw.fetchval("SELECT now() = statement_timestamp()") is False, "нет транзакции"
     await raw.execute("SET LOCAL enable_seqscan = off")
+    if no_sort:
+        # «Индекс даёт порядок выдачи»: без этого при статистике почти пустой таблицы
+        # (автоанализ после других тестов) planner может предпочесть другой индекс и Sort.
+        await raw.execute("SET LOCAL enable_sort = off")
     await raw.execute("SET LOCAL plan_cache_mode = force_generic_plan")
     await raw.execute(f"PREPARE plan_probe AS {compiled}")
     try:
