@@ -8,6 +8,9 @@ from app.schemas.videos import (
     AccessEntryOut,
     AccessGrantIn,
     AccessListOut,
+    CommentIn,
+    CommentOut,
+    CommentPage,
     ReactionIn,
     ReactionOut,
     VideoCardOut,
@@ -15,6 +18,7 @@ from app.schemas.videos import (
     VideoStreamOut,
     VideoUpdateIn,
 )
+from app.services import comments as comments_service
 from app.services import manage as manage_service
 from app.services import reactions as reactions_service
 from app.services import videos as videos_service
@@ -179,3 +183,37 @@ async def delete_reaction(video_id: uuid.UUID, user: CurrentUser, db: DbSession)
 )
 async def add_view(video_id: uuid.UUID, viewer: OptionalUser, db: DbSession) -> None:
     await videos_service.add_view(db, viewer, video_id)
+
+
+@router.get(
+    "/{video_id}/comments",
+    response_model=CommentPage,
+    summary="Комментарии к видео, новые сверху",
+    responses={400: err("Некорректный курсор"), 404: err("Видео не найдено или нет доступа")},
+)
+async def list_comments(
+    video_id: uuid.UUID,
+    viewer: OptionalUser,
+    db: DbSession,
+    cursor: Cursor = None,
+    limit: Limit = 20,
+) -> CommentPage:
+    return await comments_service.list_comments(db, viewer, video_id, cursor, limit)
+
+
+@router.post(
+    "/{video_id}/comments",
+    response_model=CommentOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Написать комментарий (обычный текст, до 2000 символов)",
+    responses={
+        401: err("Требуется вход"),
+        404: err("Видео не найдено или нет доступа"),
+        409: err("Видео ещё не обработано или скрыто модератором"),
+        503: err("Видео сейчас изменяется — повторить (Retry-After)"),
+    },
+)
+async def add_comment(
+    video_id: uuid.UUID, data: CommentIn, user: CurrentUser, db: DbSession
+) -> CommentOut:
+    return await comments_service.add_comment(db, user, video_id, data.body)

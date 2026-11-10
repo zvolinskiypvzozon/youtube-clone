@@ -13,6 +13,8 @@
 
 Плюс `can_manage(viewer, owner_id)` — правка, допуск, удаление: только владелец, и
 `owned_filter(viewer)` — его SQL-аналог для «Моих видео» (все свои видео в любом статусе).
+`can_interact(video)` / `interactable_filter()` — реакции, новые комментарии, просмотры;
+`can_delete_comment(viewer, author_id, video_owner_id)` — автор или владелец видео.
 
 Кто видит одно видео (`can_view`):
   - владелец, модератор, админ — всегда (скрытое и необработанное тоже);
@@ -86,6 +88,15 @@ def can_interact(video: Video) -> bool:
     return video.status == VideoStatus.ready and video.moderation == ModerationState.ok
 
 
+def can_delete_comment(
+    viewer: User | None, author_id: uuid.UUID, video_owner_id: uuid.UUID
+) -> bool:
+    """Удалить комментарий: автор (даже потеряв доступ к приватному видео — это его данные)
+    или владелец видео (под своим видео — любой). Под скрытым видео тоже: удаление контента —
+    не взаимодействие. Staff — через модерацию дня 6, не здесь (ADR 0006 доп. 5)."""
+    return viewer is not None and viewer.id in (author_id, video_owner_id)
+
+
 def sees_internal_state(viewer: User | None, owner_id: uuid.UUID) -> bool:
     """Статус обработки, видимость, пометка модерации и причина отказа: владельцу и staff.
     Остальные получают только публичную карточку."""
@@ -149,5 +160,5 @@ def owned_filter(viewer: User) -> ColumnElement[bool]:
 
 def interactable_filter() -> ColumnElement[bool]:
     """SQL-аналог can_interact: готово и не скрыто модератором. Для атомарных записей
-    (счётчик просмотров), где условие проверяется в самом UPDATE."""
+    (счётчики просмотров и комментариев), где условие проверяется в самом UPDATE."""
     return and_(Video.status == _READY, Video.moderation == _MOD_OK)

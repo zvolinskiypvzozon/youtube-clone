@@ -82,6 +82,38 @@ async def wait_for_lock_waiters(blocker_pid: int, count: int = 1) -> None:
             await asyncio.sleep(0.02)
 
 
+async def wait_for_lock_queue(blocker_pid: int, count: int) -> None:
+    """Как wait_for_lock_waiters, но считает очередь целиком: второй ожидающий той же строки
+    заблокирован первым ожидающим (tuple lock), а не держателем — pg_blocking_pids его
+    к держателю не относит. Считаются сеансы, связанные с `blocker_pid` цепочкой."""
+    deadline = time.monotonic() + LOCK_WAIT_SECONDS
+    async with get_sessionmaker()() as probe:
+        while True:
+            rows = (
+                await probe.execute(
+                    text(
+                        "SELECT pid, pg_blocking_pids(pid) FROM pg_stat_activity "
+                        "WHERE cardinality(pg_blocking_pids(pid)) > 0"
+                    )
+                )
+            ).all()
+            await probe.rollback()
+            chain, queued = {blocker_pid}, set()
+            grew = True
+            while grew:
+                grew = False
+                for pid, blockers in rows:
+                    if pid not in queued and chain.intersection(blockers):
+                        queued.add(pid)
+                        chain.add(pid)
+                        grew = True
+            if len(queued) >= count:
+                return
+            if time.monotonic() > deadline:
+                raise AssertionError(f"в очереди за {blocker_pid}: {len(queued)}, нужно {count}")
+            await asyncio.sleep(0.02)
+
+
 # --- Видео: состояния и подготовка данных ------------------------------------------------
 
 PUB, UNL, PRIV = VideoVisibility.public, VideoVisibility.unlisted, VideoVisibility.private

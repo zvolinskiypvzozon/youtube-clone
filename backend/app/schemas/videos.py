@@ -2,7 +2,14 @@ import uuid
 from datetime import datetime
 from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    model_validator,
+)
 
 from app.models import ModerationState, ReactionKind, VideoStatus, VideoVisibility
 from app.schemas.uploads import Title
@@ -156,3 +163,39 @@ class ReactionOut(BaseModel):
     my_reaction: ReactionKind | None
     likes_count: int
     dislikes_count: int
+
+
+def _no_nul(value: str) -> str:
+    # NUL в text Postgres не принимает — без этой проверки был бы 500 (как в аудите 3b).
+    if "\x00" in value:
+        raise ValueError("Текст не может содержать NUL-символ")
+    return value
+
+
+COMMENT_MAX = 2000
+
+# Длина — после обрезки пробелов по краям, как в CHECK body_length.
+CommentBody = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1, max_length=COMMENT_MAX),
+    AfterValidator(_no_nul),
+]
+
+
+class CommentIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    body: CommentBody = Field(examples=["Отличное видео!"])
+
+
+class CommentOut(BaseModel):
+    id: uuid.UUID
+    body: str = Field(description="Обычный текст: выводить только как текст, не как HTML")
+    created_at: datetime
+    author: ChannelBrief = Field(description="Канал автора")
+    can_delete: bool = Field(description="Текущий пользователь может удалить комментарий")
+
+
+class CommentPage(BaseModel):
+    items: list[CommentOut] = Field(description="Новые сверху")
+    next_cursor: str | None = Field(description="null — это последняя страница")

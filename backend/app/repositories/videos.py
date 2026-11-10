@@ -384,3 +384,17 @@ async def add_view(db: AsyncSession, video_id: uuid.UUID, where: ColumnElement[b
         .values(views_count=Video.views_count + 1, updated_at=Video.updated_at)
     )
     await db.execute(stmt)
+
+
+async def add_comment_count(
+    db: AsyncSession, video_id: uuid.UUID, delta: int, where: ColumnElement[bool]
+) -> bool:
+    """Атомарно меняет comments_count. Условие `where` (из policies) проверяется в самом
+    UPDATE, как у просмотров. False — строка не подошла (нет видео или условие не выполнено)."""
+    stmt = (
+        update(Video)
+        .where(Video.id == video_id, where)
+        .values(comments_count=Video.comments_count + delta, updated_at=Video.updated_at)
+        .returning(Video.id)
+    )
+    return (await db.execute(stmt)).scalar_one_or_none() is not None
