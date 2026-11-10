@@ -108,6 +108,9 @@ class ChannelOut(BaseModel):
     description: str
     subscribers_count: int
     created_at: datetime
+    subscribed: bool | None = Field(
+        default=None, description="Подписан ли текущий пользователь; null — аноним"
+    )
 
 
 class VideoUpdateIn(BaseModel):
@@ -198,4 +201,20 @@ class CommentOut(BaseModel):
 
 class CommentPage(BaseModel):
     items: list[CommentOut] = Field(description="Новые сверху")
+    next_cursor: str | None = Field(description="null — это последняя страница")
+
+
+class SubscriptionOut(BaseModel):
+    subscribed: bool
+    subscribers_count: int
+
+
+class MySubscriptionItem(BaseModel):
+    channel: ChannelBrief
+    subscribers_count: int
+    subscribed_at: datetime
+
+
+class MySubscriptionPage(BaseModel):
+    items: list[MySubscriptionItem] = Field(description="Новые подписки сверху")
     next_cursor: str | None = Field(description="null — это последняя страница")

@@ -18,6 +18,7 @@ from app.core.errors import Conflict, NotFound
 from app.models import Channel, User, Video, VideoFileKind, VideoStatus
 from app.repositories import channels as channels_repo
 from app.repositories import reactions as reactions_repo
+from app.repositories import subscriptions as subscriptions_repo
 from app.repositories import videos as videos_repo
 from app.schemas.videos import (
     ChannelBrief,
@@ -187,10 +188,17 @@ async def feed(db: AsyncSession, after_cursor: str | None, limit: int) -> VideoP
     return await _catalog(db, after_cursor, limit)
 
 
-async def get_channel(db: AsyncSession, handle: str) -> ChannelOut:
+async def get_channel(db: AsyncSession, viewer: User | None, handle: str) -> ChannelOut:
+    """Канал: публичные данные и счётчик подписчиков (кто подписан — не отдаётся);
+    `subscribed` — только про текущего пользователя, null для анонима."""
     channel = await channels_repo.get_by_handle(db, handle)
     if channel is None:
         raise NotFound(CHANNEL_NOT_FOUND)
+    subscribed = (
+        await subscriptions_repo.is_subscribed(db, channel.id, viewer.id)
+        if viewer is not None
+        else None
+    )
     return ChannelOut(
         id=channel.id,
         handle=channel.handle,
@@ -198,6 +206,7 @@ async def get_channel(db: AsyncSession, handle: str) -> ChannelOut:
         description=channel.description,
         subscribers_count=channel.subscribers_count,
         created_at=channel.created_at,
+        subscribed=subscribed,
     )
 
 
