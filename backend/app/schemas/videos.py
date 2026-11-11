@@ -5,6 +5,7 @@ from typing import Annotated
 from pydantic import (
     AfterValidator,
     BaseModel,
+    BeforeValidator,
     ConfigDict,
     Field,
     StringConstraints,
@@ -13,7 +14,8 @@ from pydantic import (
 
 from app.models import ModerationState, ReactionKind, VideoStatus, VideoVisibility
 from app.schemas.common import no_nul
-from app.schemas.uploads import Title
+from app.schemas.text import clean_text, require_visible
+from app.schemas.uploads import Description, Title
 
 
 class ChannelBrief(BaseModel):
@@ -120,7 +122,7 @@ class VideoUpdateIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     title: Title | None = Field(default=None, examples=["Новое название"])
-    description: str | None = Field(default=None, max_length=5000)
+    description: Description | None = None
     visibility: VideoVisibility | None = None
 
     @model_validator(mode="after")
@@ -183,7 +185,8 @@ SearchQuery = Annotated[
 CommentBody = Annotated[
     str,
     StringConstraints(strip_whitespace=True, min_length=1, max_length=COMMENT_MAX),
-    AfterValidator(no_nul),
+    BeforeValidator(clean_text),
+    AfterValidator(require_visible),
 ]
 
 

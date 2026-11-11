@@ -1,18 +1,35 @@
 import uuid
 from typing import Annotated
 
-from pydantic import BaseModel, Field, StringConstraints
+from pydantic import AfterValidator, BaseModel, BeforeValidator, Field, StringConstraints
 
 from app.models import VideoStatus, VideoVisibility
+from app.schemas.text import blank_if_invisible, clean_text, require_visible, single_line
 
 MAX_UPLOAD_BYTES = 2 * 1024**3
 
-Title = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
+# Порядок метаданных — app/schemas/text.py: чистка → обрезка и длина → проверка видимости.
+# BeforeValidator: последний в списке выполняется первым (clean_text, затем single_line).
+# Длина — после обрезки пробелов по краям, как в CHECK title_length.
+Title = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1, max_length=100),
+    BeforeValidator(single_line),
+    BeforeValidator(clean_text),
+    AfterValidator(require_visible),
+]
+# Описание без видимых символов — пустое (необязательное поле).
+Description = Annotated[
+    str,
+    StringConstraints(max_length=5000),
+    BeforeValidator(clean_text),
+    AfterValidator(blank_if_invisible),
+]
 
 
 class UploadCreateIn(BaseModel):
     title: Title = Field(examples=["Мой первый ролик"])
-    description: str = Field(default="", max_length=5000)
+    description: Description = ""
     # Обязательное поле: в форме по умолчанию «Открытый доступ», но API не угадывает.
     visibility: VideoVisibility
     content_type: str = Field(

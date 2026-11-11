@@ -5,6 +5,7 @@ from typing import Annotated
 from pydantic import (
     AfterValidator,
     BaseModel,
+    BeforeValidator,
     ConfigDict,
     Field,
     StringConstraints,
@@ -19,7 +20,7 @@ from app.models import (
     VideoStatus,
     VideoVisibility,
 )
-from app.schemas.common import no_nul
+from app.schemas.text import clean_text, require_visible
 
 
 class AdminUserOut(BaseModel):
@@ -48,11 +49,13 @@ class RoleUpdateIn(BaseModel):
 
 MODERATION_REASON_MAX = 500
 
-# Причина действия модератора: пробелы по краям обрезаются, 1–500 символов, без NUL.
+# Причина действия модератора и бана: пробелы по краям обрезаются, 1–500 символов, без
+# управляющих и bidi-символов, хотя бы один видимый символ (app/schemas/text.py).
 ModerationReason = Annotated[
     str,
     StringConstraints(strip_whitespace=True, min_length=1, max_length=MODERATION_REASON_MAX),
-    AfterValidator(no_nul),
+    BeforeValidator(clean_text),
+    AfterValidator(require_visible),
 ]
 
 

@@ -2,19 +2,27 @@ import uuid
 from datetime import datetime
 from typing import Annotated
 
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    StringConstraints,
+)
 
 from app.models import ReportCategory, ReportStatus
-from app.schemas.common import no_nul
+from app.schemas.text import clean_text, none_if_invisible
 
 REPORT_COMMENT_MAX = 500
 
-# Необязательный текст жалобы: пробелы по краям обрезаются, пустая строка — как отсутствие.
+# Необязательный текст жалобы: пробелы по краям обрезаются; текст без видимых символов
+# (в том числе пустой) — как отсутствие пояснения.
 ReportComment = Annotated[
     str,
     StringConstraints(strip_whitespace=True, max_length=REPORT_COMMENT_MAX),
-    AfterValidator(no_nul),
-    AfterValidator(lambda v: v or None),
+    BeforeValidator(clean_text),
+    AfterValidator(none_if_invisible),
 ]
 
 

@@ -5,6 +5,7 @@ from typing import Annotated
 from pydantic import (
     AfterValidator,
     BaseModel,
+    BeforeValidator,
     ConfigDict,
     Field,
     StringConstraints,
@@ -12,7 +13,7 @@ from pydantic import (
 )
 
 from app.models import PlaylistVisibility
-from app.schemas.common import no_nul
+from app.schemas.text import blank_if_invisible, clean_text, require_visible, single_line
 from app.schemas.videos import ChannelBrief, VideoStateOut
 
 PLAYLIST_TITLE_MAX = 150
@@ -22,10 +23,16 @@ PLAYLIST_DESCRIPTION_MAX = 5000
 PlaylistTitle = Annotated[
     str,
     StringConstraints(strip_whitespace=True, min_length=1, max_length=PLAYLIST_TITLE_MAX),
-    AfterValidator(no_nul),
+    BeforeValidator(single_line),  # выполняется после clean_text
+    BeforeValidator(clean_text),
+    AfterValidator(require_visible),
 ]
+# Описание без видимых символов — пустое (необязательное поле).
 PlaylistDescription = Annotated[
-    str, StringConstraints(max_length=PLAYLIST_DESCRIPTION_MAX), AfterValidator(no_nul)
+    str,
+    StringConstraints(max_length=PLAYLIST_DESCRIPTION_MAX),
+    BeforeValidator(clean_text),
+    AfterValidator(blank_if_invisible),
 ]
 
 
