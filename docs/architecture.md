@@ -151,6 +151,10 @@ backend/            FastAPI, worker, alembic, tests
   app/models/       SQLAlchemy-модели
   app/worker/       фоновая обработка
 frontend/           React + Vite + TypeScript SPA
+  src/api/          клиент (CSRF, ошибки, повторы), типы из OpenAPI (npm run gen:api → schema.d.ts)
+  src/auth/         сессия (AuthProvider, RequireAuth), безопасный возврат после входа
+  src/components/   макет, поиск, карточки, UserText — единственный вывод пользовательского текста
+  src/pages/        экраны; TanStack Query (кэш, курсоры), React Router; Vitest + ESLint в CI
 infra/nginx/        конфиг и Dockerfile web
 infra/silo/         инициализация хранилища
 scripts/            gen-env, seed, smoke
