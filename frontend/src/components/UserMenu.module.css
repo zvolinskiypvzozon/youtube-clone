@@ -1,0 +1,77 @@
+.root {
+  position: relative;
+}
+
+.avatar {
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 50%;
+  background: var(--avatar);
+  color: #fff;
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.menu {
+  position: absolute;
+  right: 0;
+  top: 40px;
+  z-index: 30;
+  min-width: 240px;
+  padding: 8px 0;
+  border-radius: 12px;
+  background: var(--bg);
+  box-shadow: var(--shadow);
+}
+
+.head {
+  display: flex;
+  flex-direction: column;
+  padding: 8px 16px 12px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 8px;
+}
+
+.name {
+  font-weight: 500;
+}
+
+.handle {
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+
+.item {
+  display: block;
+  width: 100%;
+  padding: 10px 16px;
+  border: none;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.item:hover,
+.item:focus-visible {
+  background: var(--hover);
+}
+
+.error {
+  position: absolute;
+  right: 0;
+  top: 40px;
+  z-index: 30;
+  width: 280px;
+  margin: 0;
+  padding: 12px;
+  border-radius: 8px;
+  background: var(--danger-bg);
+  color: var(--danger);
+  font-size: 14px;
+  box-shadow: var(--shadow);
+}

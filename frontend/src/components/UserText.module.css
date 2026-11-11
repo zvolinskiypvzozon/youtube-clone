@@ -1,0 +1,12 @@
+.text {
+  unicode-bidi: isolate;
+  overflow-wrap: anywhere;
+  overflow: hidden;
+}
+
+.clamped {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: var(--lines);
+  line-clamp: var(--lines);
+}

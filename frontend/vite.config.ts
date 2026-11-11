@@ -1,4 +1,4 @@
-import { defineConfig } from "vite";
+import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 
 // В dev-режиме API и хранилище проксируются на запущенный docker-стек (порт 80).
@@ -12,5 +12,10 @@ export default defineConfig({
       "/yt-raw": target,
       "/yt-media": target,
     },
+  },
+  test: {
+    environment: "jsdom",
+    setupFiles: ["src/test/setup.ts"],
+    restoreMocks: true,
   },
 });
