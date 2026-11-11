@@ -277,6 +277,18 @@ async def test_token_wrong_password(client: AsyncClient) -> None:
     assert r.status_code == 401
 
 
+@pytest.mark.parametrize("path", ["/api/auth/login", "/api/auth/token"])
+async def test_login_with_nul_is_invalid_credentials(client: AsyncClient, path: str) -> None:
+    """NUL в логине Postgres не принимает (22021) — был 500 (аудит шага 1 дня 6). Такого
+    пользователя быть не может: ответ — как на неверный логин, без запроса к БД."""
+    login = "ab\x00cd"
+    if path.endswith("/login"):
+        r = await client.post(path, json={"login": login, "password": "x" * 8})
+    else:
+        r = await client.post(path, data={"username": login, "password": "x" * 8})
+    assert r.status_code == 401, r.text
+
+
 async def test_channel_created_once_per_user(client: AsyncClient, db: AsyncSession) -> None:
     creds = await _register(client)
     count = (

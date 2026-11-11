@@ -111,7 +111,9 @@ async def login(
     client: ClientInfo,
     previous_token: str | None = None,
 ) -> AuthResult:
-    if len(password) > MAX_PASSWORD_LEN or len(login) > 254:
+    # NUL Postgres в text не принимает (было 500, аудит шага 1 дня 6); такого пользователя
+    # быть не может — ответ как на неверный логин, оба пути (/login и /token).
+    if len(password) > MAX_PASSWORD_LEN or len(login) > 254 or "\x00" in login:
         raise Unauthorized(INVALID_CREDENTIALS)
     user = await users_repo.get_by_login(db, login.strip())
     if user is None:
