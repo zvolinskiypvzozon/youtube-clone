@@ -25,6 +25,9 @@ from app.models import (
     Channel,
     Job,
     JobType,
+    Reaction,
+    ReactionKind,
+    Subscription,
     User,
     Video,
     VideoAccess,
@@ -309,6 +312,7 @@ def catalog_page_stmt(
     limit: int,
     channel_id: uuid.UUID | None = None,
     title_contains: str | None = None,
+    subscribed_by: uuid.UUID | None = None,
 ) -> Select:
     """Страница каталога, новые сверху, keyset по (published_at, id).
 
@@ -326,6 +330,10 @@ def catalog_page_stmt(
     )
     if channel_id is not None:
         stmt = stmt.where(Video.channel_id == channel_id)
+    if subscribed_by is not None:
+        # Лента подписок (день 9): тот же каталог, каналы — из подписок пользователя.
+        subscribed = select(Subscription.channel_id).where(Subscription.user_id == subscribed_by)
+        stmt = stmt.where(Video.channel_id.in_(subscribed))
     if title_contains is not None:
         # Подстрока без учёта регистра; ix_videos_title_trgm (GIN, gin_trgm_ops).
         pattern = f"%{escape_like(title_contains)}%"
@@ -342,8 +350,9 @@ async def catalog_page(
     limit: int,
     channel_id: uuid.UUID | None = None,
     title_contains: str | None = None,
+    subscribed_by: uuid.UUID | None = None,
 ) -> list[CatalogRow]:
-    stmt = catalog_page_stmt(where, after, limit, channel_id, title_contains)
+    stmt = catalog_page_stmt(where, after, limit, channel_id, title_contains, subscribed_by)
     rows = (await db.execute(stmt)).all()
     return [
         CatalogRow(video, channel, (bucket, key) if key else None)
@@ -427,3 +436,46 @@ async def add_comment_count(
 async def ids_of_channel(db: AsyncSession, channel_id: uuid.UUID) -> list[uuid.UUID]:
     """Все видео канала в любом статусе (удаление пользователя), без блокировок."""
     return list(await db.scalars(select(Video.id).where(Video.channel_id == channel_id)))
+
+
+@dataclass(frozen=True)
+class LikedRow:
+    video: Video
+    channel: Channel
+    thumbnail: tuple[str, str] | None
+    liked_at: datetime
+
+
+async def liked_page(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    where: ColumnElement[bool],
+    after: tuple[datetime, uuid.UUID] | None,
+    limit: int,
+) -> list[LikedRow]:
+    """«Понравившиеся» (день 9): видео с лайком пользователя, новые лайки сверху, keyset по
+    (reactions.created_at, video_id) — индекс ix_reactions_user_kind_created. Условие `where`
+    — policies.visible_filter(зритель): ставшее недоступным видео из списка пропадает."""
+    thumb = aliased(VideoFile)
+    stmt = (
+        select(Video, Channel, thumb.bucket, thumb.s3_key, Reaction.created_at)
+        .join(Reaction, Reaction.video_id == Video.id)
+        .join(Channel, Channel.id == Video.channel_id)
+        .outerjoin(thumb, and_(thumb.video_id == Video.id, thumb.kind == VideoFileKind.thumbnail))
+        .where(
+            Reaction.user_id == user_id,
+            Reaction.kind == ReactionKind.like,
+            Video.status == VideoStatus.ready,
+            Video.published_at.is_not(None),
+            where,
+        )
+        .order_by(Reaction.created_at.desc(), Video.id.desc())
+        .limit(limit)
+    )
+    if after is not None:
+        stmt = stmt.where(tuple_(Reaction.created_at, Video.id) < tuple_(*after))
+    rows = (await db.execute(stmt)).all()
+    return [
+        LikedRow(video, channel, (bucket, key) if key else None, liked_at)
+        for video, channel, bucket, key, liked_at in rows
+    ]

@@ -7,7 +7,7 @@ from app.api.routes.auth import clear_auth_cookies
 from app.schemas.auth import AccountDeleteIn
 from app.schemas.common import err
 from app.schemas.playlists import PlaylistPage
-from app.schemas.videos import MySubscriptionPage, MyVideoPage
+from app.schemas.videos import MySubscriptionPage, MyVideoPage, VideoPage
 from app.services import accounts as accounts_service
 from app.services import playlists as playlists_service
 from app.services import subscriptions as subscriptions_service
@@ -38,6 +38,30 @@ async def delete_me(data: AccountDeleteIn, user: CurrentUser, db: DbSession) -> 
     response = Response(status_code=status.HTTP_204_NO_CONTENT)
     clear_auth_cookies(response)
     return response
+
+
+@router.get(
+    "/feed",
+    response_model=VideoPage,
+    summary="Лента подписок: готовые открытые видео каналов из подписок, новые сверху",
+    responses={400: err("Некорректный курсор"), 401: err("Требуется вход")},
+)
+async def subscriptions_feed(
+    user: CurrentUser, db: DbSession, cursor: Cursor = None, limit: Limit = 24
+) -> VideoPage:
+    return await videos_service.subscriptions_feed(db, user, cursor, limit)
+
+
+@router.get(
+    "/liked",
+    response_model=VideoPage,
+    summary="Понравившиеся: видео с вашим лайком, которые вам доступны, новые лайки сверху",
+    responses={400: err("Некорректный курсор"), 401: err("Требуется вход")},
+)
+async def liked_videos(
+    user: CurrentUser, db: DbSession, cursor: Cursor = None, limit: Limit = 24
+) -> VideoPage:
+    return await videos_service.liked(db, user, cursor, limit)
 
 
 @router.get(

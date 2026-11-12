@@ -189,6 +189,7 @@ async def _catalog(
     limit: int,
     channel_id: uuid.UUID | None = None,
     query: str | None = None,
+    subscribed_by: uuid.UUID | None = None,
 ) -> VideoPage:
     after = cursor.decode(after_cursor) if after_cursor else None
     rows = await videos_repo.catalog_page(
@@ -198,6 +199,7 @@ async def _catalog(
         limit + 1,
         channel_id=channel_id,
         title_contains=query,
+        subscribed_by=subscribed_by,
     )
     has_more = len(rows) > limit
     rows = rows[:limit]
@@ -231,6 +233,42 @@ async def feed(
     Поиск — подстрока в названии, новые сверху (упрощение: без ранжирования по
     релевантности — оно несовместимо с keyset-пагинацией)."""
     return await _catalog(db, after_cursor, limit, query=query)
+
+
+async def subscriptions_feed(
+    db: AsyncSession, viewer: User, after_cursor: str | None, limit: int
+) -> VideoPage:
+    """Лента подписок (день 9): каталог (listed_filter — готовые открытые, не скрытые, автор
+    не забанен) по каналам из подписок зрителя, новые сверху."""
+    return await _catalog(db, after_cursor, limit, subscribed_by=viewer.id)
+
+
+async def liked(db: AsyncSession, viewer: User, after_cursor: str | None, limit: int) -> VideoPage:
+    """«Понравившиеся» (день 9): видео с лайком зрителя, которые он может открыть
+    (visible_filter: приватное без допуска, скрытое, видео забаненного — пропадают), новые лайки
+    сверху. Курсор — по моменту лайка."""
+    after = cursor.decode(after_cursor) if after_cursor else None
+    rows = await videos_repo.liked_page(
+        db, viewer.id, policies.visible_filter(viewer), after, limit + 1
+    )
+    has_more = len(rows) > limit
+    rows = rows[:limit]
+    signed = iter(await sign_objects([r.thumbnail for r in rows if r.thumbnail is not None]))
+    items = [
+        VideoListItem(
+            id=r.video.id,
+            title=r.video.title,
+            channel=channel_brief(r.channel),
+            duration_seconds=r.video.duration_seconds,
+            views_count=r.video.views_count,
+            published_at=r.video.published_at,
+            thumbnail_url=next(signed) if r.thumbnail is not None else None,
+        )
+        for r in rows
+    ]
+    last = rows[-1] if rows else None
+    next_cursor = cursor.encode(last.liked_at, last.video.id) if has_more and last else None
+    return VideoPage(items=items, next_cursor=next_cursor)
 
 
 async def get_channel(db: AsyncSession, viewer: User | None, handle: str) -> ChannelOut:
