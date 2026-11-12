@@ -18,6 +18,9 @@ interface AuthState {
   register: (data: RegisterIn) => Promise<Me>;
   /** Выход: после успеха — на главную. Ошибка (кроме 401) пробрасывается, сессия остаётся. */
   logout: () => Promise<void>;
+  /** Удаление аккаунта: после успеха — как выход (сброс кэша, главная, аноним). Ошибка
+   * (неверный пароль, последний админ, сеть) пробрасывается, аккаунт и сессия остаются. */
+  deleteAccount: (password: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthState | null>(null);
@@ -95,6 +98,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // После выхода — на главную. Переход React Router v7 идёт в startTransition
         // (низкий приоритет), поэтому закрытая страница сама ведёт на главную (loggedOut),
         // а не на вход.
+        setLoggedOut(true);
+        navigate("/");
+        await switchUser(null);
+      },
+      deleteAccount: async (password) => {
+        await authApi.deleteAccount(password);
+        // Сессия и cookie удалены сервером: тот же путь, что после выхода (решение дня 9).
         setLoggedOut(true);
         navigate("/");
         await switchUser(null);

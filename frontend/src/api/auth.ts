@@ -15,3 +15,7 @@ export async function fetchMe(signal?: AbortSignal): Promise<Me | null> {
 export const login = (data: LoginIn) => api("post", "/api/auth/login", { body: data });
 export const register = (data: RegisterIn) => api("post", "/api/auth/register", { body: data });
 export const logout = () => api("post", "/api/auth/logout");
+
+/** Удаление своего аккаунта с подтверждением паролем (сервер очищает cookie сессии). */
+export const deleteAccount = (password: string) => api("delete", "/api/me", { body: { password } });
+

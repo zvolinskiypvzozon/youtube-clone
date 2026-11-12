@@ -6,6 +6,7 @@ import { AuthProvider } from "./auth/AuthContext";
 import { RequireAuth } from "./auth/RequireAuth";
 import { RequireStaff } from "./auth/RequireStaff";
 import { ModerationPage } from "./pages/moderation/ModerationPage";
+import { AccountPage } from "./pages/account/AccountPage";
 import { Layout } from "./components/Layout";
 import { HomePage } from "./pages/HomePage";
 import { LoginPage } from "./pages/LoginPage";
@@ -40,6 +41,14 @@ export function AppRoutes() {
           element={
             <RequireAuth>
               <MyVideosPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="account"
+          element={
+            <RequireAuth>
+              <AccountPage />
             </RequireAuth>
           }
         />

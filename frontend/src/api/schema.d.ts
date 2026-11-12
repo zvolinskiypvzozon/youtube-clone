@@ -150,7 +150,11 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        delete?: never;
+        /**
+         * Удалить пользователя (admin): только user и moderator
+         * @description Админа удалить нельзя (403), себя — через DELETE /api/me с паролем (403 здесь); последнего администратора — никак (409). Действие пишется в журнал модерации.
+         */
+        delete: operations["delete_user_api_admin_users__user_id__delete"];
         options?: never;
         head?: never;
         /** Сменить роль пользователя (user / moderator / admin) */
@@ -545,6 +549,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Удалить свой аккаунт (подтверждение паролем)
+         * @description Удаляются канал, видео (и файлы), плейлисты, комментарии, реакции, подписки, сессии. Жалобы и журнал модерации остаются без ссылки на пользователя; ник занят навсегда. Cookie сессии очищаются. Последнего администратора удалить нельзя (409).
+         */
+        delete: operations["delete_me_api_me_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/me/videos": {
         parameters: {
             query?: never;
@@ -719,6 +743,14 @@ export interface components {
              * @description Лимит записей на одно видео
              */
             max_entries: number;
+        };
+        /**
+         * AccountDeleteIn
+         * @description Удаление своего аккаунта: подтверждение паролем (решение архитектора дня 9).
+         */
+        AccountDeleteIn: {
+            /** Password */
+            password: string;
         };
         /** AdminUserOut */
         AdminUserOut: {
@@ -1971,6 +2003,80 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_user_api_admin_users__user_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Требуется вход */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Недостаточно прав: роль цели или сам себя */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Пользователь не найден */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Последний администратор */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Неверный формат полей */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Пользователь сейчас изменяется — повторить (Retry-After) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
                 };
             };
         };
@@ -3798,6 +3904,73 @@ export interface operations {
                 };
             };
             /** @description Видео сейчас изменяется — повторить (Retry-After) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    delete_me_api_me_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AccountDeleteIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Требуется вход */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Неверный пароль или CSRF-токен */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Последний администратор */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Неверный формат полей */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Аккаунт сейчас изменяется — повторить (Retry-After) */
             503: {
                 headers: {
                     [name: string]: unknown;

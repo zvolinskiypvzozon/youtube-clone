@@ -75,6 +75,9 @@ export function UserMenu({ user }: { user: Me }) {
           <Link className={styles.item} to={`/channel/${encodeURIComponent(user.channel.handle)}`} onClick={() => setOpen(false)}>
             Мой канал
           </Link>
+          <Link className={styles.item} to="/account" onClick={() => setOpen(false)}>
+            Аккаунт
+          </Link>
           <Link className={styles.item} to="/my/videos" onClick={() => setOpen(false)}>
             Мои видео
           </Link>
