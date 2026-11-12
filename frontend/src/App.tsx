@@ -10,6 +10,8 @@ import { LoginPage } from "./pages/LoginPage";
 import { ComingSoonPage, NotFoundPage } from "./pages/PlaceholderPages";
 import { RegisterPage } from "./pages/RegisterPage";
 import { WatchPage } from "./pages/watch/WatchPage";
+import { UploadPage } from "./pages/upload/UploadPage";
+import { MyVideosPage } from "./pages/myVideos/MyVideosPage";
 
 export function AppRoutes() {
   return (
@@ -24,7 +26,7 @@ export function AppRoutes() {
           path="upload"
           element={
             <RequireAuth>
-              <ComingSoonPage title="Загрузка видео" />
+              <UploadPage />
             </RequireAuth>
           }
         />
@@ -32,7 +34,7 @@ export function AppRoutes() {
           path="my/videos"
           element={
             <RequireAuth>
-              <ComingSoonPage title="Мои видео" />
+              <MyVideosPage />
             </RequireAuth>
           }
         />
