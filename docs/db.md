@@ -150,10 +150,15 @@ erDiagram
         text comment "до 500, необязательно"
         varchar video_title "снимок"
         varchar channel_handle "снимок"
+        uuid channel_id "снимок канала, без FK (день 9)"
         report_status status "open | resolved | dismissed"
         uuid resolved_by FK
         timestamptz resolved_at
         timestamptz created_at
+    }
+    retired_usernames {
+        citext username PK "ник удалённого — занят навсегда"
+        timestamptz retired_at
     }
     moderation_log {
         uuid id PK
@@ -179,6 +184,15 @@ erDiagram
 ```
 
 ## Решения по схеме
+
+**Удаление пользователя (день 9).** Ник удалённого пользователя записывается в
+`retired_usernames` (citext, только ник — email и прочие персональные данные не хранятся) и
+навсегда недоступен для регистрации; повторная регистрация с тем же email под другим ником
+разрешена. Регистрация проверяет ник и до, и после вставки (гонка с идущим удалением). Жалоба
+хранит снимок `channel_id` (без внешнего ключа, индекс `ix_reports_channel`): «своё видео»
+модератора для удалённого видео сравнивается по нему, а не по handle; миграция заполнила
+снимок для старых жалоб по видео, а для удалённых видео — по handle. Остальное удаляется
+каскадом (см. «Каскады»), видео — заранее через `services/deletion`.
 
 **Идентификаторы.** UUID (`gen_random_uuid()`) во всех публичных сущностях: ID видео попадает
 в URL, и последовательные номера позволили бы перебором находить unlisted-видео.
