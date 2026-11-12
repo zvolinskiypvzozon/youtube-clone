@@ -39,7 +39,8 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="YouTube Clone API",
         version="0.1.0",
-        docs_url="/docs",
+        # Swagger UI отдаёт nginx своими файлами (без CDN): infra/nginx/swagger/.
+        docs_url=None,
         redoc_url=None,
         openapi_url="/openapi.json",
     )

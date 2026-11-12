@@ -489,6 +489,24 @@ def check_delete(owner: dict, video_id: str, media_url: str) -> None:
         raise AssertionError("удалённое видео осталось в «Моих видео»")
 
 
+@step("Swagger UI своими файлами: /docs без CDN и inline-скриптов, статика — JS")
+def check_swagger() -> None:
+    status, headers, body = http("GET", "/docs")
+    expect(status, 200, body)
+    csp = header(headers, "Content-Security-Policy") or ""
+    script_src = next((d for d in csp.split(";") if d.strip().startswith("script-src")), "")
+    if "unsafe-inline" in script_src or "http" in csp or b"cdn." in body:
+        raise AssertionError(f"/docs: внешние ресурсы или inline-скрипты: {csp}")
+    for path in ("/swagger-ui/swagger-ui-bundle.js", "/swagger-ui/swagger-init.js"):
+        status, headers, body = http("GET", path)
+        expect(status, 200, body)
+        # Пропавший файл nginx отдал бы как index.html SPA (try_files) — с nosniff не выполнится.
+        if "javascript" not in (header(headers, "Content-Type") or ""):
+            raise AssertionError(f"{path}: не JavaScript ({header(headers, 'Content-Type')})")
+    status, _, body = http("GET", "/api/docs")
+    expect(status, 404, body)
+
+
 @step("Rate limit: поток поиска с одного IP получает 429")
 def check_rate_limit() -> None:
     """Последним: после него зона search с этого IP занята несколько секунд."""
@@ -531,6 +549,7 @@ def main() -> int:
         check_privacy(owner, video_id)
         check_delete(owner, video_id, media_url)
         deleted = True
+        check_swagger()
         check_rate_limit()
     except SmokeError:
         print("ПРОВАЛ")
