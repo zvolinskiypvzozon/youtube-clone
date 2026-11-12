@@ -21,3 +21,6 @@ dist/
 
 # Локальные настройки Claude Code (личные; общие — .claude/settings.json)
 .claude/settings.local.json
+
+# Демо-учётки сида (пароли; права 600)
+.deploy/

@@ -2,5 +2,7 @@
 extend = "../backend/pyproject.toml"
 
 [lint.per-file-ignores]
-# smoke.py: docker compose из PATH и запросы на адрес, который задаёт оператор, — по назначению.
+# smoke.py, seed.py: docker compose из PATH и запросы на адрес, который задаёт оператор, —
+# по назначению.
 "smoke.py" = ["S310", "S603", "S607"]
+"seed.py" = ["S310", "S603", "S607"]

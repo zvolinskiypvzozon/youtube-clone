@@ -126,13 +126,12 @@ until curl -fsS "http://127.0.0.1:${HTTP_PORT}/api/health" >/dev/null 2>&1; do
   sleep 3
 done
 
+# Сбой сида не обрывает деплой: стек уже здоров, а очистка контейнеров с секретами и сводка
+# ниже должны выполниться в любом случае (ревью дня 9); код выхода — в конце.
+SEED_FAILED=0
 if [[ $SEED -eq 1 ]]; then
-  if [[ -f scripts/seed.sh ]]; then
-    log "Загружаю демо-данные"
-    bash scripts/seed.sh
-  else
-    log "Скрипт демо-данных ещё не готов — пропускаю"
-  fi
+  log "Загружаю демо-данные (отключить: --no-seed)"
+  bash scripts/seed.sh "http://127.0.0.1:${HTTP_PORT}" || SEED_FAILED=1
 fi
 
 IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
@@ -170,6 +169,16 @@ else
   echo
 fi
 
+# Демо-учётки: только путь к файлу паролей (сами пароли в вывод не попадают — решение дня 9).
+if [[ $SEED -eq 1 && $SEED_FAILED -eq 0 ]]; then
+  cat <<EOF
+  Демо-учётки (demo_admin, demo_moderator, demo_user, demo_author) — ТОЛЬКО для проверки;
+  для реального запуска используйте --no-seed. Пароли:
+    sudo cat $(pwd)/.deploy/demo-credentials
+
+EOF
+fi
+
 # Одноразовые контейнеры (migrate, storage-init) держат секреты в окружении
 # (видны в docker inspect) — после успешного деплоя удаляем их.
 docker compose rm -f migrate storage-init >/dev/null 2>&1 || true
@@ -180,3 +189,8 @@ NEW_IMAGE_IDS="$(project_image_ids)"
 for old_id in $OLD_IMAGE_IDS; do
   grep -qx "$old_id" <<<"$NEW_IMAGE_IDS" || docker image rm "$old_id" >/dev/null 2>&1 || true
 done
+
+if [[ $SEED_FAILED -eq 1 ]]; then
+  echo "ОШИБКА: демо-данные не загружены (стек работает). Повторить: sudo bash scripts/seed.sh" >&2
+  exit 1
+fi
