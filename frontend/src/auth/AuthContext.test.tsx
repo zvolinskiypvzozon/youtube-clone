@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { focusManager, useQuery } from "@tanstack/react-query";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { request } from "../api/client";
@@ -24,6 +24,53 @@ function Private() {
 }
 
 describe("смена пользователя", () => {
+  it.each([
+    ["другой пользователь", { ...ME, id: "u2", username: "bob" }, "bob"],
+    ["аноним", null, "аноним"],
+  ])("/me при возврате во вкладку: %s — данные прежней сессии сброшены (аудит дня 8)", async (_c, next, owner) => {
+    let me: object | null = ME;
+    let session = "alice";
+    mockApi({
+      "GET /api/auth/me": () => (me ? me : new Response(null, { status: 401 })),
+      "GET /api/private": () => ({ owner: session }),
+    });
+    renderApp(<Private />);
+    expect(await screen.findByText("владелец: alice")).toBeInTheDocument();
+    // Вход или выход в другой вкладке: сервер уже отвечает за другого пользователя.
+    me = next;
+    session = owner;
+    try {
+      act(() => {
+        focusManager.setFocused(false);
+        focusManager.setFocused(true);
+      });
+      expect(await screen.findByText(`владелец: ${owner}`)).toBeInTheDocument();
+    } finally {
+      focusManager.setFocused(undefined);
+    }
+  });
+
+  it("/me при возврате — тот же пользователь: данные не сбрасываются", async () => {
+    let calls = 0;
+    mockApi({
+      "GET /api/auth/me": () => ME,
+      "GET /api/private": () => ({ owner: `alice-${++calls}` }),
+    });
+    renderApp(<Private />);
+    expect(await screen.findByText("владелец: alice-1")).toBeInTheDocument();
+    try {
+      act(() => {
+        focusManager.setFocused(false);
+        focusManager.setFocused(true);
+      });
+      await act(async () => undefined);
+      await waitFor(() => expect(calls).toBe(1));
+      expect(screen.getByText("владелец: alice-1")).toBeInTheDocument();
+    } finally {
+      focusManager.setFocused(undefined);
+    }
+  });
+
   it("вход сбрасывает данные прежней сессии и запрашивает их заново", async () => {
     let session = "аноним";
     mockApi({

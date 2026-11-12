@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import * as authApi from "../api/auth";
@@ -34,11 +34,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     refetchOnWindowFocus: "always",
   });
 
+  // Смена пользователя, которую заметили не вход/выход этой вкладки: 401 на любом запросе
+  // или /me при возврате во вкладку (вход или выход в другой вкладке) — тот же сброс данных
+  // прежней сессии (аудит дня 8: иначе следующему пользователю остались бы поля staff,
+  // can_delete и черновики). Смену, сделанную switchUser, не сбрасываем второй раз.
+  const lastUser = useRef<string | null | undefined>(undefined);
+  const handledUser = useRef<string | null | undefined>(undefined);
+  const currentUser = me.data === undefined ? undefined : (me.data?.id ?? null);
+  useEffect(() => {
+    if (currentUser === undefined) return;
+    const previous = lastUser.current;
+    lastUser.current = currentUser;
+    if (handledUser.current === currentUser) {
+      handledUser.current = undefined;
+      return;
+    }
+    if (previous !== undefined && previous !== currentUser) void resetSessionData(queryClient);
+  }, [currentUser, queryClient]);
+
   // Смена пользователя: запрос /me, начатый под прежней сессией, отменяется (иначе его
   // поздний ответ затёр бы нового пользователя), остальные данные сбрасываются и активные
   // запросы перезапрашиваются уже под новой сессией.
   const switchUser = useCallback(
     async (user: Me | null) => {
+      handledUser.current = user?.id ?? null;
       await queryClient.cancelQueries({ queryKey: ME_KEY });
       queryClient.setQueryData(ME_KEY, user);
       await resetSessionData(queryClient);

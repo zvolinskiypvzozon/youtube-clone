@@ -37,7 +37,13 @@ export function LocationProbe() {
 export function renderApp(ui: ReactElement, { route = "/", state }: { route?: string; state?: unknown } = {}) {
   const client = createQueryClient();
   // В тестах — без повторов и задержек (политику повторов проверяет retry.test.ts).
-  client.setDefaultOptions({ queries: { retry: false }, mutations: { retry: false } });
+  // Остальные настройки — как в приложении (refetchOnWindowFocus, staleTime): иначе тесты
+  // проверяли бы поведение, которого в приложении нет.
+  const defaults = client.getDefaultOptions();
+  client.setDefaultOptions({
+    queries: { ...defaults.queries, retry: false },
+    mutations: { ...defaults.mutations, retry: false },
+  });
   return render(
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={[{ pathname: route.split("?")[0], search: route.includes("?") ? `?${route.split("?")[1]}` : "", state }]}>

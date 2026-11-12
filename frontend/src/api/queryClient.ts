@@ -20,15 +20,14 @@ export function createQueryClient(): QueryClient {
 }
 
 /**
- * 401 — сессия истекла или отозвана: интерфейс анонима и сброс данных прежней сессии
- * (аудит дня 7). Сброс — только при переходе «вошёл → аноним»: иначе запрос, которому нужен
- * вход, после сброса снова получил бы 401 — бесконечный цикл.
+ * 401 — сессия истекла или отозвана: интерфейс анонима (аудит дня 7). Данные прежней сессии
+ * сбрасывает AuthProvider — на любой смене пользователя, в том числе замеченной через /me
+ * (аудит дня 8), и только при переходе: иначе запрос, которому нужен вход, после сброса снова
+ * получил бы 401 — бесконечный цикл.
  */
 function onUnauthorized(client: QueryClient, error: unknown): void {
   if (!(error instanceof ApiError && error.status === 401)) return;
-  const wasLoggedIn = Boolean(client.getQueryData(ME_KEY));
-  client.setQueryData(ME_KEY, null);
-  if (wasLoggedIn) void resetSessionData(client);
+  if (client.getQueryData(ME_KEY) !== null) client.setQueryData(ME_KEY, null);
 }
 
 /**
