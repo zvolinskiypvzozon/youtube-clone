@@ -74,14 +74,20 @@ function PlaylistContent({ playlist }: { playlist: Playlist }) {
   const remove = useMutation({
     mutationFn: () => deletePlaylist(playlist.id),
     onSuccess: async () => {
-      // Сначала уйти со страницы, затем убрать её данные: иначе смонтированный запрос
-      // перезапросил бы удалённый плейлист и мелькнуло бы «не найден» (аудит дня 8).
       const handle = user?.channel.handle ?? playlist.channel.handle;
       navigate(`/channel/${encodeURIComponent(handle)}?tab=playlists`, { replace: true });
-      await queryClient.cancelQueries({ queryKey: playlistKey(playlist.id) });
-      queryClient.removeQueries({ queryKey: playlistKey(playlist.id) });
-      queryClient.removeQueries({ queryKey: playlistVideosKey(playlist.id) });
-      await refreshLists();
+      // Страница ещё смонтирована (переход React Router — с низким приоритетом): удалённый
+      // плейлист нельзя ни удалять из кэша, ни инвалидировать с перезапросом — ушёл бы GET,
+      // 404 и мелькнуло бы «не найден» (ревью и аудит дня 8; воспроизведено тестом). Свои
+      // ключи — только пометить устаревшими, остальные списки — обновить.
+      const own = (key: readonly unknown[]) =>
+        (key[0] === "playlist" || key[0] === "playlist-videos") && key[1] === playlist.id;
+      await Promise.all([
+        queryClient.invalidateQueries({ predicate: (q) => own(q.queryKey), refetchType: "none" }),
+        ...PLAYLIST_LIST_KEYS.map((queryKey) =>
+          queryClient.invalidateQueries({ queryKey, predicate: (q) => !own(q.queryKey) }),
+        ),
+      ]);
     },
   });
 
