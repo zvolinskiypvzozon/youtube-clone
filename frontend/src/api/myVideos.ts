@@ -1,26 +1,26 @@
-import { request } from "./client";
-import type { AccessEntry, AccessList, MyVideoPage, VideoCard, VideoUpdateIn } from "./types";
+import { api } from "./typed";
+import type { VideoUpdateIn } from "./types";
 
 export const MY_VIDEOS_PAGE_SIZE = 24;
 export const myVideosKey = ["my-videos"] as const;
 export const accessKey = (videoId: string) => ["video-access", videoId] as const;
 
-const videoPath = (id: string) => `/api/videos/${encodeURIComponent(id)}`;
+const p = (video_id: string) => ({ params: { video_id } });
 
 export const fetchMyVideos = (cursor: string | null, signal?: AbortSignal) =>
-  request<MyVideoPage>("/api/me/videos", { query: { cursor, limit: MY_VIDEOS_PAGE_SIZE }, signal });
+  api("get", "/api/me/videos", { query: { cursor, limit: MY_VIDEOS_PAGE_SIZE }, signal });
 
 /** Правка владельцем: только изменённые поля. */
 export const updateVideo = (id: string, data: VideoUpdateIn) =>
-  request<VideoCard>(videoPath(id), { method: "PATCH", body: data });
+  api("patch", "/api/videos/{video_id}", { ...p(id), body: data });
 
-export const deleteVideo = (id: string) => request<void>(videoPath(id), { method: "DELETE" });
+export const deleteVideo = (id: string) => api("delete", "/api/videos/{video_id}", p(id));
 
 export const fetchAccess = (id: string, signal?: AbortSignal) =>
-  request<AccessList>(`${videoPath(id)}/access`, { signal });
+  api("get", "/api/videos/{video_id}/access", { ...p(id), signal });
 
 export const grantAccess = (id: string, username: string) =>
-  request<AccessEntry>(`${videoPath(id)}/access`, { method: "POST", body: { username } });
+  api("post", "/api/videos/{video_id}/access", { ...p(id), body: { username } });
 
 export const revokeAccess = (id: string, userId: string) =>
-  request<void>(`${videoPath(id)}/access/${encodeURIComponent(userId)}`, { method: "DELETE" });
+  api("delete", "/api/videos/{video_id}/access/{user_id}", { params: { video_id: id, user_id: userId } });

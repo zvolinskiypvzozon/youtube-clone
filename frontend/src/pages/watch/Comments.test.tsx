@@ -2,7 +2,7 @@ import { act, fireEvent, screen, waitFor, within } from "@testing-library/react"
 import { focusManager } from "@tanstack/react-query";
 import { Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { json, ME, mockApi, renderApp, type Handler } from "../../test/utils";
+import { json, ME, mockApi, renderApp, type Handler, type MockRoutes } from "../../test/utils";
 import { WatchPage } from "./WatchPage";
 
 const BOB = { id: "c2", handle: "bob", title: "Канал Боба" };
@@ -42,7 +42,7 @@ function comment(n: number, overrides: Record<string, unknown> = {}) {
 const STAFF = { ...ME, id: "staff1", role: "moderator", channel: { id: "cs", handle: "mod", title: "Модератор" } };
 const anon: Handler = () => json({ detail: "Требуется вход" }, 401);
 
-function api(routes: Record<string, Handler> = {}, { user = ME as object | null } = {}) {
+function api(routes: MockRoutes = {}, { user = ME as object | null } = {}) {
   return mockApi({
     "GET /api/auth/me": user ? () => user : anon,
     "GET /api/videos/v1": () => card(),
@@ -282,7 +282,7 @@ describe("Comments: staff", () => {
     api(
       {
         "GET /api/videos/v1/comments": () => ({ items: [comment(2, { author_user_id: "u8", author_banned: banned })], next_cursor: null }),
-        "POST /api/admin/users/u8/ban": ban,
+        "PUT /api/admin/users/u8/ban": ban,
       },
       { user: STAFF },
     );
@@ -301,7 +301,7 @@ describe("Comments: staff", () => {
     api(
       {
         "GET /api/videos/v1/comments": () => ({ items: [comment(2, { author_user_id: "u8", author_banned: false })], next_cursor: null }),
-        "POST /api/admin/users/u8/ban": () => json({ detail: "Недостаточно прав" }, 403),
+        "PUT /api/admin/users/u8/ban": () => json({ detail: "Недостаточно прав" }, 403),
       },
       { user: STAFF },
     );
@@ -403,7 +403,7 @@ describe("Comments: ревью и аудит шага 2", () => {
       {
         "GET /api/videos/v1": getCard,
         "GET /api/videos/v1/comments": () => ({ items: [comment(2, { author_user_id: "u8", author_banned: false })], next_cursor: null }),
-        "POST /api/admin/users/u8/ban": () => ({ user_id: "u8", username: "u", role: "user", is_banned: true, banned_reason: "x", banned_by_role: "moderator" }),
+        "PUT /api/admin/users/u8/ban": () => ({ user_id: "u8", username: "u", role: "user", is_banned: true, banned_reason: "x", banned_by_role: "moderator" }),
       },
       { user: STAFF },
     );

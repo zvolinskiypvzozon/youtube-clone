@@ -90,6 +90,24 @@ export default tseslint.config(
     },
   },
   {
+    // Вызовы API — только через api() (src/api/typed.ts): метод и путь сверяются со схемой
+    // OpenAPI при компиляции. Прямой request() — только в typed.ts и тестах самого клиента.
+    files: ["src/**/*.{ts,tsx}"],
+    ignores: ["src/api/typed.ts", "src/api/client.ts", "src/api/client.test.ts"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          paths: [
+            { name: "./client", importNames: ["request"], message: "Вызовы API — через api() из src/api/typed.ts." },
+            { name: "../api/client", importNames: ["request"], message: "Вызовы API — через api() из src/api/typed.ts." },
+            { name: "../../api/client", importNames: ["request"], message: "Вызовы API — через api() из src/api/typed.ts." },
+          ],
+        },
+      ],
+    },
+  },
+  {
     files: ["vite.config.ts", "eslint.config.js"],
     languageOptions: { globals: { ...globals.node } },
   },

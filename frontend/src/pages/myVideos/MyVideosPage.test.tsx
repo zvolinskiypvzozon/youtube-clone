@@ -1,6 +1,6 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { json, ME, mockApi, renderApp, type Handler } from "../../test/utils";
+import { json, ME, mockApi, renderApp, type Handler, type MockRoutes } from "../../test/utils";
 import { changedFields, MY_VIDEOS_POLL_MS, MyVideosPage } from "./MyVideosPage";
 
 function item(n: number, state: Record<string, unknown> = {}) {
@@ -34,7 +34,7 @@ function card(n: number, extra: Record<string, unknown> = {}) {
   };
 }
 
-function api(routes: Record<string, Handler> = {}) {
+function api(routes: MockRoutes = {}) {
   return mockApi({
     "GET /api/auth/me": () => ME,
     "GET /api/me/videos": () => ({ items: [item(1)], next_cursor: null }),

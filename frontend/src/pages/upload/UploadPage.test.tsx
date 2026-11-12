@@ -1,7 +1,7 @@
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { Route, Routes, useNavigate } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { json, ME, mockApi, renderApp, type Handler } from "../../test/utils";
+import { json, ME, mockApi, renderApp, type MockRoutes } from "../../test/utils";
 import { titleFromFile, UploadPage, validateFile } from "./UploadPage";
 
 /** XHR для частей: по умолчанию отвечает 200 с ETag; hold — не отвечает (отмена). */
@@ -53,7 +53,7 @@ const STARTED = {
   ],
 };
 
-function api(routes: Record<string, Handler> = {}) {
+function api(routes: MockRoutes = {}) {
   return mockApi({
     "GET /api/auth/me": () => ME,
     "POST /api/uploads": () => json(STARTED, 201),

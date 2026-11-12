@@ -4,12 +4,22 @@ import type { ReactElement } from "react";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { vi } from "vitest";
 import { createQueryClient } from "../api/queryClient";
+import type { RouteKey } from "../api/typed";
 import { AuthProvider } from "../auth/AuthContext";
 
 export type Handler = (url: URL, init: RequestInit) => Response | object | Promise<Response | object>;
 
-/** Подменяет fetch: ключ "METHOD /path" → ответ (объект — JSON 200). Нет ключа — 404. */
-export function mockApi(routes: Record<string, Handler>) {
+/** Моки API: ключ — только метод и путь из OpenAPI (schema.d.ts), иначе ошибка tsc. Мок на
+ * несуществующий метод (POST вместо PUT у бана — ручная проверка дня 8) не скомпилируется. */
+export type MockRoutes = Partial<Record<RouteKey, Handler>>;
+
+export function mockApi(routes: MockRoutes) {
+  return mockFetchRaw(routes as Record<string, Handler>);
+}
+
+/** Подменяет fetch: ключ "METHOD /path" → ответ (объект — JSON 200). Нет ключа — 404.
+ * Без сверки со схемой — только для тестов самого HTTP-клиента (client.test.ts). */
+export function mockFetchRaw(routes: Record<string, Handler>) {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
     const url = new URL(String(input), "http://localhost");
     const key = `${(init.method ?? "GET").toUpperCase()} ${url.pathname}`;

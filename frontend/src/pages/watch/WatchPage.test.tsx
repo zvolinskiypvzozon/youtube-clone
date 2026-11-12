@@ -1,7 +1,7 @@
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { json, ME, mockApi, renderApp, type Handler } from "../../test/utils";
+import { json, ME, mockApi, renderApp, type Handler, type MockRoutes } from "../../test/utils";
 import { PROCESSING_POLL_MS, WatchPage } from "./WatchPage";
 
 const BOB_CHANNEL = { id: "c2", handle: "bob", title: "Канал Боба" };
@@ -42,7 +42,7 @@ const STREAM = {
 
 const anon: Handler = () => json({ detail: "Требуется вход" }, 401);
 
-function api(routes: Record<string, Handler> = {}, { user = ME as object | null } = {}) {
+function api(routes: MockRoutes = {}, { user = ME as object | null } = {}) {
   return mockApi({
     "GET /api/auth/me": user ? () => user : anon,
     "GET /api/videos/v1": () => card(),

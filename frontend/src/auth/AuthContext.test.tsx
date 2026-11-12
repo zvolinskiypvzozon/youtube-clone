@@ -1,14 +1,18 @@
 import { focusManager, useQuery } from "@tanstack/react-query";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { request } from "../api/client";
+import { api } from "../api/typed";
 import { ME, mockApi, renderApp } from "../test/utils";
 import { useAuth } from "./AuthContext";
 
 /** Данные, зависящие от того, кто вошёл (как будущие «Мои видео»). */
 function Private() {
   const { user, login } = useAuth();
-  const data = useQuery({ queryKey: ["private"], queryFn: () => request<{ owner: string }>("/api/private") });
+  // Любой запрос, зависящий от сессии; тело в тесте — { owner } (тип ответа здесь не важен).
+  const data = useQuery({
+    queryKey: ["private"],
+    queryFn: () => api("get", "/api/me/videos") as unknown as Promise<{ owner: string }>,
+  });
   return (
     <div>
       <p>владелец: {data.data?.owner ?? "—"}</p>
@@ -32,7 +36,7 @@ describe("смена пользователя", () => {
     let session = "alice";
     mockApi({
       "GET /api/auth/me": () => (me ? me : new Response(null, { status: 401 })),
-      "GET /api/private": () => ({ owner: session }),
+      "GET /api/me/videos": () => ({ owner: session }),
     });
     renderApp(<Private />);
     expect(await screen.findByText("владелец: alice")).toBeInTheDocument();
@@ -54,7 +58,7 @@ describe("смена пользователя", () => {
     let calls = 0;
     mockApi({
       "GET /api/auth/me": () => ME,
-      "GET /api/private": () => ({ owner: `alice-${++calls}` }),
+      "GET /api/me/videos": () => ({ owner: `alice-${++calls}` }),
     });
     renderApp(<Private />);
     expect(await screen.findByText("владелец: alice-1")).toBeInTheDocument();
@@ -79,7 +83,7 @@ describe("смена пользователя", () => {
         session = "bob";
         return { ...ME, username: "bob" };
       },
-      "GET /api/private": () => ({ owner: session }),
+      "GET /api/me/videos": () => ({ owner: session }),
     });
     renderApp(<Private />);
     expect(await screen.findByText("владелец: аноним")).toBeInTheDocument();
@@ -93,7 +97,7 @@ describe("смена пользователя", () => {
     mockApi({
       "GET /api/auth/me": () => new Promise<Response>((resolve) => (releaseMe = resolve)),
       "POST /api/auth/login": () => ({ ...ME, username: "bob" }),
-      "GET /api/private": () => ({ owner: "bob" }),
+      "GET /api/me/videos": () => ({ owner: "bob" }),
     });
     renderApp(<Private />);
     await waitFor(() => expect(screen.getByText("вошёл: нет")).toBeInTheDocument());
@@ -112,7 +116,7 @@ describe("смена пользователя", () => {
     let expired = false;
     const fetchMock = mockApi({
       "GET /api/auth/me": () => (expired ? new Response(null, { status: 401 }) : ME),
-      "GET /api/private": () => (expired ? new Response(null, { status: 401 }) : { owner: "alice" }),
+      "GET /api/me/videos": () => (expired ? new Response(null, { status: 401 }) : { owner: "alice" }),
     });
     const client = renderApp(<Private />);
     expect(await screen.findByText("владелец: alice")).toBeInTheDocument();
@@ -122,7 +126,7 @@ describe("смена пользователя", () => {
     expect(await screen.findByText("вошёл: нет")).toBeInTheDocument();
     expect(screen.getByText("владелец: —")).toBeInTheDocument();
     await new Promise((r) => setTimeout(r, 300));
-    const privateCalls = fetchMock.mock.calls.filter(([u]) => String(u) === "/api/private").length;
+    const privateCalls = fetchMock.mock.calls.filter(([u]) => String(u) === "/api/me/videos").length;
     expect(privateCalls).toBeLessThanOrEqual(3); // начальный, ручной, один после сброса
     client.unmount();
   });

@@ -2,7 +2,8 @@ import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { Route, Routes } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { CSRF_HEADER, request } from "../api/client";
+import { CSRF_HEADER } from "../api/client";
+import { api } from "../api/typed";
 import { useAuth } from "../auth/AuthContext";
 import { RequireAuth } from "../auth/RequireAuth";
 import { json, ME, mockApi, renderApp } from "../test/utils";
@@ -11,7 +12,7 @@ import { Layout } from "./Layout";
 /** Запрос, который отвечает 401, — только после того, как известен вошедший пользователь. */
 function ExpiredProbe() {
   const { user } = useAuth();
-  const probe = useQuery({ queryKey: ["probe"], queryFn: () => request("/api/probe"), enabled: !!user });
+  const probe = useQuery({ queryKey: ["probe"], queryFn: () => api("get", "/api/me/videos"), enabled: !!user });
   return <p>{probe.isError ? "ошибка" : "ждём"}</p>;
 }
 
@@ -59,7 +60,7 @@ describe("Layout и сессия", () => {
   it("401 на любом запросе (сессия истекла) → интерфейс анонима", async () => {
     mockApi({
       "GET /api/auth/me": () => ME,
-      "GET /api/probe": () => new Response(null, { status: 401 }),
+      "GET /api/me/videos": () => new Response(null, { status: 401 }),
     });
     renderApp(
       <Routes>

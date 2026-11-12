@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mockApi, json } from "../test/utils";
+import { mockFetchRaw as mockApi, json } from "../test/utils";
 import { ApiError, CSRF_HEADER, NetworkError, parseRetryAfter, request } from "./client";
 
 async function failure(promise: Promise<unknown>): Promise<ApiError> {
