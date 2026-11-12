@@ -24,7 +24,7 @@ x-backend-build: &backend-build
 
 services:
   postgres:
-    image: postgres:17.10-alpine
+    image: postgres:17.10-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:?}
@@ -42,7 +42,7 @@ services:
 
   # Объектное хранилище: pgsty/silo — поддерживаемый форк MinIO (docs/adr/0002).
   storage:
-    image: pgsty/silo:RELEASE.2026-10-18T00-00-00Z
+    image: pgsty/silo:RELEASE.2026-10-18T00-00-00Z@sha256:2636fc4155d9a7e41ff58cdb65ddd13ba9304e67184e13c25bc5cb34016269d7
     restart: unless-stopped
     command: ["silo", "server", "/data"]
     environment:
@@ -62,7 +62,7 @@ services:
       retries: 20
 
   storage-init:
-    image: pgsty/silo:RELEASE.2026-10-18T00-00-00Z
+    image: pgsty/silo:RELEASE.2026-10-18T00-00-00Z@sha256:2636fc4155d9a7e41ff58cdb65ddd13ba9304e67184e13c25bc5cb34016269d7
     restart: "no"
     entrypoint: ["sh", "/init.sh"]
     environment:

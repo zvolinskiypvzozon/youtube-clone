@@ -12,18 +12,21 @@ concurrency:
 permissions:
   contents: read
 
+# Действия закреплены по SHA коммита (тег можно переставить; версия — в комментарии), все на
+# Node 24 (Node 20 у действий выводится из оборота). Обновлять — на версии не моложе двух недель.
+
 jobs:
   lint:
     name: Lint (ruff, eslint, vitest, tsc, shell)
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (node24)
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0 (node24)
         with:
           python-version: "3.12"
       - run: pip install ruff==0.11.8
       - run: ruff check backend scripts && ruff format --check backend scripts
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0 (node24)
         with:
           node-version: "22"
           cache: npm
@@ -46,7 +49,7 @@ jobs:
     name: Tests + stack smoke
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (node24)
       - name: Generate .env
         run: bash scripts/gen-env.sh .env
       - name: Only web publishes ports (K8)
