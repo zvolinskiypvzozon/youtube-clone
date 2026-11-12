@@ -297,6 +297,37 @@ describe("Comments: staff", () => {
     expect(ban).toHaveBeenCalledTimes(1);
   });
 
+  it("разбан из комментария: подтверждение → DELETE бана, список перезапрошен", async () => {
+    let banned = true;
+    const del = vi.fn(() => {
+      banned = false;
+      return { user_id: "u7", username: "user1", role: "user", is_banned: false, banned_reason: null, banned_by_role: null, recount_videos: 1, recount_channels: 0 };
+    });
+    api(
+      {
+        "GET /api/videos/v1/comments": () => ({ items: [comment(1, { author_user_id: "u7", author_banned: banned })], next_cursor: null }),
+        "DELETE /api/admin/users/u7/ban": del,
+      },
+      { user: STAFF },
+    );
+    render();
+    fireEvent.click(await screen.findByRole("button", { name: "Разблокировать автора" }));
+    fireEvent.click(screen.getByRole("button", { name: "Разблокировать" }));
+    await waitFor(() => expect(within(list()).queryByText("Автор заблокирован")).not.toBeInTheDocument());
+    expect(del).toHaveBeenCalledTimes(1);
+    expect(within(list()).getByRole("button", { name: "Заблокировать автора" })).toBeInTheDocument();
+    // Кнопка исчезла — фокус на заголовок секции, итог объявлен.
+    expect(screen.getByRole("heading", { level: 2 })).toHaveFocus();
+    expect(screen.getByRole("status")).toHaveTextContent("Автор разблокирован");
+  });
+
+  it("разбана нет, если автор не заблокирован или поля staff не пришли", async () => {
+    api({ "GET /api/videos/v1/comments": () => ({ items: [comment(1, { author_user_id: "u7", author_banned: false }), comment(2)], next_cursor: null }) }, { user: STAFF });
+    render();
+    await screen.findByText("Комментарий 2");
+    expect(screen.queryByRole("button", { name: "Разблокировать автора" })).not.toBeInTheDocument();
+  });
+
   it("бан: 403 от сервера показывается текстом", async () => {
     api(
       {

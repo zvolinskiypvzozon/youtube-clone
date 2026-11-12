@@ -4,6 +4,8 @@ import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { createQueryClient } from "./api/queryClient";
 import { AuthProvider } from "./auth/AuthContext";
 import { RequireAuth } from "./auth/RequireAuth";
+import { RequireStaff } from "./auth/RequireStaff";
+import { ModerationPage } from "./pages/moderation/ModerationPage";
 import { Layout } from "./components/Layout";
 import { HomePage } from "./pages/HomePage";
 import { LoginPage } from "./pages/LoginPage";
@@ -39,6 +41,14 @@ export function AppRoutes() {
             <RequireAuth>
               <MyVideosPage />
             </RequireAuth>
+          }
+        />
+        <Route
+          path="moderation"
+          element={
+            <RequireStaff>
+              <ModerationPage />
+            </RequireStaff>
           }
         />
         <Route path="*" element={<NotFoundPage />} />

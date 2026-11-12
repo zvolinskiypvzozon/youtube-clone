@@ -25,7 +25,7 @@ export function createQueryClient(): QueryClient {
  * (аудит дня 8), и только при переходе: иначе запрос, которому нужен вход, после сброса снова
  * получил бы 401 — бесконечный цикл.
  */
-function onUnauthorized(client: QueryClient, error: unknown): void {
+export function onUnauthorized(client: QueryClient, error: unknown): void {
   if (!(error instanceof ApiError && error.status === 401)) return;
   if (client.getQueryData(ME_KEY) !== null) client.setQueryData(ME_KEY, null);
 }

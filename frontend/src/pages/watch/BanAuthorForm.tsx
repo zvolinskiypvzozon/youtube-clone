@@ -1,8 +1,8 @@
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ApiError, errorMessage } from "../../api/client";
-import { BAN_REASON_MAX, banUser, commentsKey } from "../../api/comments";
-import { PLAYLIST_LIST_KEYS } from "../../api/playlists";
+import { BAN_REASON_MAX, banUser } from "../../api/comments";
+import { refreshAfterModeration } from "../../api/moderation";
 import { UserText } from "../../components/UserText";
 import styles from "./Comments.module.css";
 
@@ -13,12 +13,10 @@ import styles from "./Comments.module.css";
  */
 export function BanAuthorForm({
   userId,
-  videoId,
   authorTitle,
   onBanned,
 }: {
   userId: string;
-  videoId: string;
   authorTitle: string;
   onBanned: () => void;
 }) {
@@ -33,13 +31,7 @@ export function BanAuthorForm({
     // пересчитал счётчики (комментарии, реакции, подписчики) всех затронутых видео и каналов.
     onSuccess: async () => {
       onBanned();
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: commentsKey(videoId) }),
-        queryClient.invalidateQueries({ queryKey: ["video"] }),
-        queryClient.invalidateQueries({ queryKey: ["channel"] }),
-        queryClient.invalidateQueries({ queryKey: ["channel-videos"] }),
-        ...PLAYLIST_LIST_KEYS.map((queryKey) => queryClient.invalidateQueries({ queryKey })),
-      ]);
+      await refreshAfterModeration(queryClient);
     },
   });
 

@@ -12,10 +12,13 @@ import { StateMessage } from "../../components/StateMessage";
 import { UserText } from "../../components/UserText";
 import { initial } from "../../components/VideoCard";
 import { formatComments, formatRelative } from "../../lib/format";
+import { refreshAfterModeration, unbanUser } from "../../api/moderation";
+import { ReasonAction } from "../../components/ReasonAction";
 import { BanAuthorForm } from "./BanAuthorForm";
 import styles from "./Comments.module.css";
 
 type Pages = InfiniteData<CommentPage, string | null>;
+
 
 /** Свёрнут до 8 строк с «Читать полностью»: явно длиннее 8 строк (≈ 90 символов в строке). */
 export const isLongComment = (text: string) => text.length > 720 || text.split("\n").length > 8;
@@ -64,8 +67,9 @@ export function Comments({ video }: { video: VideoCard }) {
     headingRef.current?.focus();
   };
 
-  const onBanned = () => {
-    setAnnounce("Автор заблокирован");
+  // Бан или разбан из комментария: кнопка исчезает — фокус на заголовок, итог объявляется.
+  const onModerated = (message: string) => {
+    setAnnounce(message);
     headingRef.current?.focus();
   };
 
@@ -103,9 +107,8 @@ export function Comments({ video }: { video: VideoCard }) {
             <CommentItem
               key={comment.id}
               comment={comment}
-              videoId={video.id}
               onDeleted={onDeleted}
-              onBanned={onBanned}
+              onModerated={onModerated}
             />
           ))}
         </ul>
@@ -208,16 +211,15 @@ function CommentForm({ videoId, onAdded }: { videoId: string; onAdded: (c: Comme
 
 function CommentItem({
   comment,
-  videoId,
   onDeleted,
-  onBanned,
+  onModerated,
 }: {
   comment: Comment;
-  videoId: string;
   onDeleted: (id: string) => Promise<void>;
-  onBanned: () => void;
+  onModerated: (message: string) => void;
 }) {
   const { user } = useAuth();
+  const queryClient = useQueryClient();
   const [expanded, setExpanded] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const bodyId = useId();
@@ -313,12 +315,25 @@ function CommentItem({
                 Удалить
               </button>
             ))}
+          {comment.author_banned === true && comment.author_user_id && (
+            <ReasonAction
+              label="Разблокировать автора"
+              reasonLabel="Снять блокировку? Комментарии автора снова станут видны всем."
+              submitLabel="Разблокировать"
+              required={false}
+              withReason={false}
+              onSubmit={async () => {
+                await unbanUser(comment.author_user_id as string);
+                await refreshAfterModeration(queryClient);
+                onModerated("Автор разблокирован");
+              }}
+            />
+          )}
           {canBan && comment.author_user_id && (
             <BanAuthorForm
               userId={comment.author_user_id}
-              videoId={videoId}
               authorTitle={comment.author.title}
-              onBanned={onBanned}
+              onBanned={() => onModerated("Автор заблокирован")}
             />
           )}
         </div>

@@ -23,6 +23,13 @@ describe("api: сверка со схемой OpenAPI на этапе компи
       void api("put", "/api/videos/{video_id}/reaction", { params: { video_id: "v" }, body: { kind: "love" } });
       // @ts-expect-error — тело обязательно
       void api("post", "/api/videos/{video_id}/comments", { params: { video_id: "v" } });
+      // Необязательное тело (requestBody?: в схеме): можно передать и можно не передавать.
+      void api("post", "/api/admin/reports/{report_id}/dismiss", { params: { report_id: "r" }, body: { reason: "x" } });
+      void api("post", "/api/admin/reports/{report_id}/dismiss", { params: { report_id: "r" } });
+      // @ts-expect-error — необязательное тело тоже сверяется со схемой
+      void api("post", "/api/admin/reports/{report_id}/dismiss", { params: { report_id: "r" }, body: { why: "x" } });
+      // @ts-expect-error — у операции без тела тело передать нельзя
+      void api("get", "/api/videos/{video_id}", { params: { video_id: "v" }, body: { x: 1 } });
     }
     expect(true).toBe(true);
   });

@@ -45,3 +45,7 @@ export type PlaylistVideoItem = Schemas["PlaylistVideoItem"];
 export type PlaylistVideoPage = Schemas["PlaylistVideoPage"];
 export type PlaylistItemOut = Schemas["PlaylistItemOut"];
 export type PlaylistVisibility = Schemas["PlaylistVisibility"];
+export type ReportQueueItem = Schemas["ReportQueueItem"];
+export type ReportQueuePage = Schemas["ReportQueuePage"];
+export type ReportStatus = Schemas["ReportStatus"];
+export type ModerationState = Schemas["ModerationState"];

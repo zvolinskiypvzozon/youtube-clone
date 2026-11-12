@@ -33,12 +33,24 @@ export type ResponseOf<P extends keyof paths, M extends MethodsOf<P>> =
 export type BodyOf<P extends keyof paths, M extends MethodsOf<P>> =
   Operation<P, M> extends { requestBody: { content: { "application/json": infer B } } } ? B : never;
 
+/** Необязательное тело (`requestBody?:` в схеме, например причина отклонения жалобы). */
+export type OptionalBodyOf<P extends keyof paths, M extends MethodsOf<P>> =
+  [BodyOf<P, M>] extends [never]
+    ? [NonNullable<Operation<P, M>["requestBody"]>] extends [never]
+      ? never
+      : NonNullable<Operation<P, M>["requestBody"]> extends { content: { "application/json": infer B } }
+        ? B
+        : never
+    : never;
+
 type ParamsArg<P extends string> = [PathParamNames<P>] extends [never]
   ? { params?: undefined }
   : { params: Record<PathParamNames<P>, string> };
 
 type BodyArg<P extends keyof paths, M extends MethodsOf<P>> = [BodyOf<P, M>] extends [never]
-  ? { body?: undefined }
+  ? [OptionalBodyOf<P, M>] extends [never]
+    ? { body?: undefined }
+    : { body?: OptionalBodyOf<P, M> }
   : { body: BodyOf<P, M> };
 
 export type ApiOptions<P extends keyof paths, M extends MethodsOf<P>> = ParamsArg<P & string> &
