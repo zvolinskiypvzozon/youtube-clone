@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatDuration, formatRelative, formatSubscribers, formatViews } from "./format";
+import { formatComments, formatDuration, formatRelative, formatSubscribers, formatViews } from "./format";
 
 describe("формат", () => {
   it("просмотры: склонение и сокращение", () => {
@@ -18,6 +18,13 @@ describe("формат", () => {
     expect(formatSubscribers(4)).toBe("4 подписчика");
     expect(formatSubscribers(12)).toBe("12 подписчиков");
     expect(formatSubscribers(1500)).toMatch(/^1,5\sтыс\. подписчиков$/);
+  });
+
+  it("комментарии: склонение", () => {
+    expect(formatComments(0)).toBe("0 комментариев");
+    expect(formatComments(1)).toBe("1 комментарий");
+    expect(formatComments(22)).toBe("22 комментария");
+    expect(formatComments(15)).toBe("15 комментариев");
   });
 
   it("длительность", () => {

@@ -21,3 +21,6 @@ export type SubscriptionOut = Schemas["SubscriptionOut"];
 export type ReportCategory = Schemas["ReportCategory"];
 export type ReportIn = Schemas["ReportIn"];
 export type ReportCreatedOut = Schemas["ReportCreatedOut"];
+export type Comment = Schemas["CommentOut"];
+export type CommentPage = Schemas["CommentPage"];
+export type BanOut = Schemas["BanOut"];

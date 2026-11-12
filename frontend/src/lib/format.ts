@@ -30,6 +30,18 @@ export function formatSubscribers(count: number): string {
   return `${count} ${SUBSCRIBER_FORMS[plural.select(count)]}`;
 }
 
+const COMMENT_FORMS: Record<string, string> = {
+  one: "комментарий",
+  few: "комментария",
+  many: "комментариев",
+  other: "комментария",
+};
+
+/** «1 комментарий», «3 комментария», «12 345 комментариев». */
+export function formatComments(count: number): string {
+  return `${count.toLocaleString("ru-RU")} ${COMMENT_FORMS[plural.select(count)]}`;
+}
+
 /** Целое число с разделением разрядов: «12 345». */
 export function formatCount(count: number): string {
   return count.toLocaleString("ru-RU");

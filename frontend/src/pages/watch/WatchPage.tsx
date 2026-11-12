@@ -14,6 +14,7 @@ import { initial } from "../../components/VideoCard";
 import { VideoPlayer } from "../../components/VideoPlayer";
 import { formatRelative, formatSubscribers, formatViews } from "../../lib/format";
 import { useDocumentTitle } from "../../lib/useDocumentTitle";
+import { Comments } from "./Comments";
 import { ReactionButtons } from "./ReactionButtons";
 import { ReportForm } from "./ReportForm";
 import { VideoStateBanner } from "./VideoStateBanner";
@@ -29,7 +30,9 @@ const isProcessing = (video: VideoCard | undefined) => video?.state?.status === 
 const isLongText = (text: string) => text.length > 200 || text.split("\n").length > 3;
 
 export function WatchPage() {
-  const { videoId = "" } = useParams();
+  // UUID из адреса — в нижнем регистре, как в ответах API: ключи кэша карточки совпадают с
+  // ключами, которые обновляют реакции и комментарии (по video.id).
+  const videoId = (useParams().videoId ?? "").toLowerCase();
   const video = useQuery({
     queryKey: videoKey(videoId),
     queryFn: ({ signal }) => fetchVideo(videoId, signal),
@@ -148,6 +151,8 @@ function WatchContent({ video }: { video: VideoCard }) {
           <ReportForm videoId={video.id} />
         </div>
       )}
+
+      {ready && <Comments video={video} />}
     </article>
   );
 }
