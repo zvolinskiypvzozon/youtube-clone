@@ -13,7 +13,8 @@ export function SubscribeButton({ channel }: { channel: Channel }) {
   const queryClient = useQueryClient();
   const mutation = useMutation({
     mutationFn: (subscribe: boolean) => setSubscription(channel.handle, subscribe),
-    onMutate: () => queryClient.cancelQueries({ queryKey: channelKey(channel.handle) }),
+    // exact: ключи сравниваются по префиксу — не задеть другие запросы канала.
+    onMutate: () => queryClient.cancelQueries({ queryKey: channelKey(channel.handle), exact: true }),
     onSuccess: (out) => {
       queryClient.setQueryData<Channel>(channelKey(channel.handle), (old) =>
         old ? { ...old, subscribed: out.subscribed, subscribers_count: out.subscribers_count } : old,

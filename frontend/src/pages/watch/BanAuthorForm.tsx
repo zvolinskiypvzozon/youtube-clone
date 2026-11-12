@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ApiError, errorMessage } from "../../api/client";
 import { BAN_REASON_MAX, banUser, commentsKey } from "../../api/comments";
+import { PLAYLIST_LIST_KEYS } from "../../api/playlists";
 import { UserText } from "../../components/UserText";
 import styles from "./Comments.module.css";
 
@@ -36,6 +37,8 @@ export function BanAuthorForm({
         queryClient.invalidateQueries({ queryKey: commentsKey(videoId) }),
         queryClient.invalidateQueries({ queryKey: ["video"] }),
         queryClient.invalidateQueries({ queryKey: ["channel"] }),
+        queryClient.invalidateQueries({ queryKey: ["channel-videos"] }),
+        ...PLAYLIST_LIST_KEYS.map((queryKey) => queryClient.invalidateQueries({ queryKey })),
       ]);
     },
   });

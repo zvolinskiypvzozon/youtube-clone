@@ -63,3 +63,8 @@ export const DislikeIcon = ({ filled }: { filled?: boolean }) => (
     )}
   </Icon>
 );
+export const ChannelIcon = () => (
+  <Icon>
+    <path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20m0 4a3.5 3.5 0 1 1 0 7 3.5 3.5 0 0 1 0-7m0 14a8 8 0 0 1-6.16-2.9C7.4 15.8 9.6 15 12 15s4.6.8 6.16 2.1A8 8 0 0 1 12 20" />
+  </Icon>
+);

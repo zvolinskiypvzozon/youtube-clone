@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, NavLink, Outlet } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
-import { HomeIcon, LogoIcon, MenuIcon, UploadIcon, VideosIcon } from "./Icons";
+import { ChannelIcon, HomeIcon, LogoIcon, MenuIcon, UploadIcon, VideosIcon } from "./Icons";
 import { SearchBox } from "./SearchBox";
 import { UserMenu } from "./UserMenu";
 import styles from "./Layout.module.css";
@@ -16,6 +16,7 @@ export function Layout() {
     { to: "/", label: "Главная", icon: <HomeIcon />, end: true },
     ...(user
       ? [
+          { to: `/channel/${encodeURIComponent(user.channel.handle)}`, label: "Мой канал", icon: <ChannelIcon />, end: false },
           { to: "/my/videos", label: "Мои видео", icon: <VideosIcon />, end: false },
           { to: "/upload", label: "Загрузить", icon: <UploadIcon />, end: false },
         ]

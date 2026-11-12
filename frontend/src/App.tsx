@@ -7,11 +7,13 @@ import { RequireAuth } from "./auth/RequireAuth";
 import { Layout } from "./components/Layout";
 import { HomePage } from "./pages/HomePage";
 import { LoginPage } from "./pages/LoginPage";
-import { ComingSoonPage, NotFoundPage } from "./pages/PlaceholderPages";
+import { NotFoundPage } from "./pages/PlaceholderPages";
 import { RegisterPage } from "./pages/RegisterPage";
 import { WatchPage } from "./pages/watch/WatchPage";
 import { UploadPage } from "./pages/upload/UploadPage";
 import { MyVideosPage } from "./pages/myVideos/MyVideosPage";
+import { ChannelPage } from "./pages/channel/ChannelPage";
+import { PlaylistPage } from "./pages/playlist/PlaylistPage";
 
 export function AppRoutes() {
   return (
@@ -21,7 +23,8 @@ export function AppRoutes() {
         <Route path="login" element={<LoginPage />} />
         <Route path="register" element={<RegisterPage />} />
         <Route path="watch/:videoId" element={<WatchPage />} />
-        <Route path="channel/:handle" element={<ComingSoonPage title="Канал" />} />
+        <Route path="channel/:handle" element={<ChannelPage />} />
+        <Route path="playlist/:playlistId" element={<PlaylistPage />} />
         <Route
           path="upload"
           element={

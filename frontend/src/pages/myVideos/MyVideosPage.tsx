@@ -3,6 +3,7 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tansta
 import { Link } from "react-router-dom";
 import { ApiError, errorMessage, type FieldErrors } from "../../api/client";
 import { deleteVideo, fetchMyVideos, myVideosKey, updateVideo } from "../../api/myVideos";
+import { PLAYLIST_LIST_KEYS } from "../../api/playlists";
 import type { MyVideoItem, VideoUpdateIn, VideoVisibility } from "../../api/types";
 import { DESCRIPTION_MAX, TITLE_MAX } from "../../api/uploads";
 import { fetchVideo, videoKey } from "../../api/videos";
@@ -24,7 +25,7 @@ async function refreshAfterChange(queryClient: ReturnType<typeof useQueryClient>
   queryClient.removeQueries({ queryKey: ["stream", videoId] });
   if (removed) queryClient.removeQueries({ queryKey: videoKey(videoId) });
   await Promise.all(
-    [myVideosKey, ["videos"], ["channel"], ["playlist"], ["playlists"]].map((queryKey) =>
+    [myVideosKey, ["videos"], ["channel"], ["channel-videos"], ...PLAYLIST_LIST_KEYS].map((queryKey) =>
       queryClient.invalidateQueries({ queryKey }),
     ),
   );

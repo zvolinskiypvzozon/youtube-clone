@@ -17,6 +17,7 @@ import { useDocumentTitle } from "../../lib/useDocumentTitle";
 import { Comments } from "./Comments";
 import { ReactionButtons } from "./ReactionButtons";
 import { ReportForm } from "./ReportForm";
+import { SaveToPlaylist } from "./SaveToPlaylist";
 import { VideoStateBanner } from "./VideoStateBanner";
 import styles from "./WatchPage.module.css";
 
@@ -151,6 +152,7 @@ function WatchContent({ video }: { video: VideoCard }) {
           <ReportForm videoId={video.id} />
         </div>
       )}
+      {isOwner && <SaveToPlaylist videoId={video.id} />}
 
       {ready && <Comments video={video} />}
     </article>
