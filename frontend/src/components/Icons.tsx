@@ -73,3 +73,13 @@ export const ShieldIcon = () => (
     <path d="M12 1 3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5zm-2 16-4-4 1.41-1.41L10 14.17l6.59-6.59L18 9z" />
   </Icon>
 );
+export const SubscriptionsIcon = () => (
+  <Icon>
+    <path d="M4 6h16V4H4zm2-4h12V0H6zm14 8H4a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-8a2 2 0 0 0-2-2m-10 9v-6l5 3z" />
+  </Icon>
+);
+export const LikedIcon = () => (
+  <Icon>
+    <path d="M2 21h4V9H2zm20-11a2 2 0 0 0-2-2h-6.31l.95-4.57.03-.32a1.5 1.5 0 0 0-.44-1.06L13.17 1 6.59 7.59A2 2 0 0 0 6 9v10a2 2 0 0 0 2 2h9a2 2 0 0 0 1.84-1.22l3.02-7.05c.09-.23.14-.47.14-.73z" />
+  </Icon>
+);

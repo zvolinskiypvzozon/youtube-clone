@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, NavLink, Outlet } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
-import { ChannelIcon, HomeIcon, LogoIcon, MenuIcon, ShieldIcon, UploadIcon, VideosIcon } from "./Icons";
+import { ChannelIcon, HomeIcon, LikedIcon, LogoIcon, MenuIcon, ShieldIcon, SubscriptionsIcon, UploadIcon, VideosIcon } from "./Icons";
 import { STAFF_ROLES } from "../auth/RequireStaff";
 import { SearchBox } from "./SearchBox";
 import { UserMenu } from "./UserMenu";
@@ -17,6 +17,8 @@ export function Layout() {
     { to: "/", label: "Главная", icon: <HomeIcon />, end: true },
     ...(user
       ? [
+          { to: "/feed/subscriptions", label: "Подписки", icon: <SubscriptionsIcon />, end: false },
+          { to: "/liked", label: "Понравившиеся", icon: <LikedIcon />, end: false },
           { to: `/channel/${encodeURIComponent(user.channel.handle)}`, label: "Мой канал", icon: <ChannelIcon />, end: false },
           { to: "/my/videos", label: "Мои видео", icon: <VideosIcon />, end: false },
           { to: "/upload", label: "Загрузить", icon: <UploadIcon />, end: false },

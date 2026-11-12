@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { errorMessage } from "../../api/client";
 import type { ReactionKind, VideoCard } from "../../api/types";
-import { setReaction, videoKey } from "../../api/videos";
+import { likedKey, setReaction, videoKey } from "../../api/videos";
 import { useAuth } from "../../auth/AuthContext";
 import { useLoginRedirect } from "../../auth/useLoginRedirect";
 import { DislikeIcon, LikeIcon } from "../../components/Icons";
@@ -18,6 +18,7 @@ export function ReactionButtons({ video }: { video: VideoCard }) {
     // Поздний ответ перезапроса карточки не затрёт счётчики из ответа реакции.
     onMutate: () => queryClient.cancelQueries({ queryKey: videoKey(video.id) }),
     onSuccess: (out) => {
+      void queryClient.invalidateQueries({ queryKey: likedKey });
       queryClient.setQueryData<VideoCard>(videoKey(video.id), (old) =>
         old
           ? { ...old, my_reaction: out.my_reaction, likes_count: out.likes_count, dislikes_count: out.dislikes_count }

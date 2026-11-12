@@ -1,6 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { errorMessage } from "../api/client";
 import { channelKey, setSubscription } from "../api/channels";
+import { subscriptionsFeedKey } from "../api/videos";
 import type { Channel } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
 import { useLoginRedirect } from "../auth/useLoginRedirect";
@@ -16,6 +17,7 @@ export function SubscribeButton({ channel }: { channel: Channel }) {
     // exact: ключи сравниваются по префиксу — не задеть другие запросы канала.
     onMutate: () => queryClient.cancelQueries({ queryKey: channelKey(channel.handle), exact: true }),
     onSuccess: (out) => {
+      void queryClient.invalidateQueries({ queryKey: subscriptionsFeedKey });
       queryClient.setQueryData<Channel>(channelKey(channel.handle), (old) =>
         old ? { ...old, subscribed: out.subscribed, subscribers_count: out.subscribers_count } : old,
       );

@@ -30,3 +30,15 @@ export const addView = (id: string) => api("post", "/api/videos/{video_id}/view"
 
 export const createReport = (id: string, data: ReportIn) =>
   api("post", "/api/videos/{video_id}/reports", { ...p(id), body: data });
+
+// Ключи — под ["videos"]: обновление после модерации и правок уже их инвалидирует.
+export const subscriptionsFeedKey = ["videos", "subscriptions"] as const;
+export const likedKey = ["videos", "liked"] as const;
+
+/** Лента подписок: готовые открытые видео каналов из подписок, новые сверху. */
+export const fetchSubscriptionsFeed = (cursor: string | null, signal?: AbortSignal) =>
+  api("get", "/api/me/feed", { query: { cursor, limit: FEED_PAGE_SIZE }, signal });
+
+/** «Понравившиеся»: видео с лайком, доступные зрителю, новые лайки сверху. */
+export const fetchLiked = (cursor: string | null, signal?: AbortSignal) =>
+  api("get", "/api/me/liked", { query: { cursor, limit: FEED_PAGE_SIZE }, signal });

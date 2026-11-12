@@ -7,6 +7,7 @@ import { RequireAuth } from "./auth/RequireAuth";
 import { RequireStaff } from "./auth/RequireStaff";
 import { ModerationPage } from "./pages/moderation/ModerationPage";
 import { AccountPage } from "./pages/account/AccountPage";
+import { LikedPage, SubscriptionsPage } from "./pages/lists/VideoListPage";
 import { Layout } from "./components/Layout";
 import { HomePage } from "./pages/HomePage";
 import { LoginPage } from "./pages/LoginPage";
@@ -41,6 +42,22 @@ export function AppRoutes() {
           element={
             <RequireAuth>
               <MyVideosPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="feed/subscriptions"
+          element={
+            <RequireAuth>
+              <SubscriptionsPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="liked"
+          element={
+            <RequireAuth>
+              <LikedPage />
             </RequireAuth>
           }
         />
