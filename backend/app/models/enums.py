@@ -67,6 +67,7 @@ class ModerationAction(StrEnum):
     user_ban = "user_ban"
     user_unban = "user_unban"
     role_change = "role_change"  # смена роли администратором
+    user_delete = "user_delete"  # удаление пользователя администратором (день 9)
 
 
 class JobType(StrEnum):

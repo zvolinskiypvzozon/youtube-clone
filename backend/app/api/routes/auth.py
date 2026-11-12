@@ -49,7 +49,7 @@ def _set_auth_cookies(response: Response, token: str) -> None:
     )
 
 
-def _clear_auth_cookies(response: Response) -> None:
+def clear_auth_cookies(response: Response) -> None:
     for name in (SESSION_COOKIE, CSRF_COOKIE):
         response.delete_cookie(name, path="/")
 
@@ -119,7 +119,7 @@ async def logout(
         await auth_service.logout(db, token_value)
     response = Response(status_code=status.HTTP_204_NO_CONTENT)
     response.headers["Cache-Control"] = "no-store"
-    _clear_auth_cookies(response)
+    clear_auth_cookies(response)
     return response
 
 

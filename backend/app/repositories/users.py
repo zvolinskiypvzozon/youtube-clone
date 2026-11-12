@@ -1,10 +1,11 @@
 import uuid
 
-from sqlalchemy import exists, func, select, text
+from sqlalchemy import delete, exists, func, select, text
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.models import Channel, User, UserRole
+from app.models import Channel, RetiredUsername, User, UserRole
 
 
 async def get_by_login(db: AsyncSession, login: str) -> User | None:
@@ -22,13 +23,23 @@ async def email_taken(db: AsyncSession, email: str) -> bool:
     return bool(await db.scalar(select(exists().where(User.email == email))))
 
 
+async def username_retired(db: AsyncSession, username: str) -> bool:
+    """Ник удалённого пользователя — занят навсегда (citext, без учёта регистра)."""
+    return bool(await db.scalar(select(exists().where(RetiredUsername.username == username))))
+
+
+async def retire_username(db: AsyncSession, username: str) -> None:
+    await db.execute(pg_insert(RetiredUsername).values(username=username).on_conflict_do_nothing())
+
+
 async def username_taken(db: AsyncSession, username: str) -> bool:
-    # handle канала = username, поэтому проверяем оба.
+    # handle канала = username, поэтому проверяем оба; плюс ники удалённых (день 9).
     return bool(
         await db.scalar(
             select(
                 exists().where(User.username == username)
                 | exists().where(Channel.handle == username)
+                | exists().where(RetiredUsername.username == username)
             )
         )
     )
@@ -137,3 +148,18 @@ async def lock_self_exclusive(db: AsyncSession, user_id: uuid.UUID) -> bool:
         .with_for_update(key_share=True)
     )
     return await db.scalar(stmt) is not None
+
+
+async def lock_channel_of(db: AsyncSession, user_id: uuid.UUID) -> Channel | None:
+    """Канал пользователя FOR UPDATE: удаление пользователя держит его до commit, поэтому
+    новая загрузка (старт блокирует строку канала — лимит «в работе») не появится между
+    удалением видео и удалением пользователя."""
+    stmt = select(Channel).where(Channel.owner_id == user_id).with_for_update()
+    return await db.scalar(stmt)
+
+
+async def delete_user(db: AsyncSession, user_id: uuid.UUID) -> None:
+    """Каскадом (ON DELETE CASCADE): канал и его плейлисты, сессии, реакции, комментарии,
+    подписки (свои и на свой канал), допуски. Видео к этому моменту уже удалены
+    (services/accounts — через services/deletion, порядок «задачи → видео»)."""
+    await db.execute(delete(User).where(User.id == user_id))

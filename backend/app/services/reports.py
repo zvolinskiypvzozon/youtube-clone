@@ -83,6 +83,7 @@ async def create_report(
         comment=data.comment,
         video_title=video.title,  # снимок: переживёт удаление видео
         channel_handle=channel.handle,
+        channel_id=channel.id,  # снимок без FK: «своё видео» модератора после удаления видео
     )
     if report is None:
         await db.rollback()

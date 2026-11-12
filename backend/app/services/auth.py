@@ -92,6 +92,13 @@ async def register(
         user = await users_repo.create_with_channel(
             db, email=data.email, username=data.username, password_hash=password_hash
         )
+        # Повторно — после вставки: если ник в этот момент освобождало удаление пользователя,
+        # вставка ждала его коммита по уникальному индексу и прошла, а запись об освобождённом
+        # нике уже видна (READ COMMITTED, новый запрос). Проверка только до вставки пропустила
+        # бы такую гонку (день 9).
+        if await users_repo.username_retired(db, data.username):
+            await db.rollback()
+            raise Conflict(USERNAME_TAKEN)
         await _revoke_previous(db, previous_token)
         token = await _open_session(db, user, client)
         await db.commit()

@@ -435,6 +435,7 @@ async def test_hide_waits_for_report_and_closes_it(client: AsyncClient, db: Asyn
             comment=None,
             video_title=video.title,
             channel_handle=channel.handle,
+            channel_id=channel.id,
         )
         assert created is not None
         await session.commit()

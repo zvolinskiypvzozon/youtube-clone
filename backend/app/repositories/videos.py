@@ -422,3 +422,8 @@ async def add_comment_count(
         .returning(Video.id)
     )
     return (await db.execute(stmt)).scalar_one_or_none() is not None
+
+
+async def ids_of_channel(db: AsyncSession, channel_id: uuid.UUID) -> list[uuid.UUID]:
+    """Все видео канала в любом статусе (удаление пользователя), без блокировок."""
+    return list(await db.scalars(select(Video.id).where(Video.channel_id == channel_id)))

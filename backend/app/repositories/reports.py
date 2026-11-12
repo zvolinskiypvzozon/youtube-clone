@@ -52,6 +52,7 @@ async def create_open(
     comment: str | None,
     video_title: str,
     channel_handle: str,
+    channel_id: uuid.UUID,
 ) -> Report | None:
     """Открытая жалоба; None — у пользователя уже есть открытая жалоба на это видео
     (частичный уникальный индекс uq_reports_open_video_reporter, без гонки проверки)."""
@@ -64,6 +65,7 @@ async def create_open(
             comment=comment,
             video_title=video_title,
             channel_handle=channel_handle,
+            channel_id=channel_id,
         )
         .on_conflict_do_nothing(
             index_elements=["video_id", "reporter_id"], index_where=text("status = 'open'")

@@ -25,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core import storage
 from app.core.config import get_settings
 from app.core.errors import Busy, NotFound
+from app.repositories import users as users_repo
 from app.repositories import videos as videos_repo
 from app.services.uploads import raw_key
 from app.services.videos import VIDEO_NOT_FOUND
@@ -41,8 +42,14 @@ class _Leftovers:
     files: list[tuple[str, str]]
 
 
+# Удаление огромного видео (много комментариев, реакций, допусков) может идти дольше общего
+# statement_timeout API (5 с → 503): свой предел на эту транзакцию (перенос дня 6 → день 9).
+DELETE_STATEMENT_TIMEOUT_MS = 30_000
+
+
 async def delete_video(db: AsyncSession, video_id: uuid.UUID) -> None:
     for _ in range(DELETE_ATTEMPTS):
+        await users_repo.set_local_statement_timeout(db, DELETE_STATEMENT_TIMEOUT_MS)
         jobs = await videos_repo.lock_jobs_of(db, video_id)
         video = await videos_repo.lock_video(db, video_id)
         if video is None:  # удалено параллельно

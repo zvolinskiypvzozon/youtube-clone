@@ -1,7 +1,7 @@
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response, status
 
 from app.api.deps import Cursor, DbSession, Limit, no_store, require_role
 from app.models import ReportStatus, User, UserRole
@@ -18,6 +18,7 @@ from app.schemas.admin import (
     VideoModerationOut,
 )
 from app.schemas.common import err
+from app.services import accounts as accounts_service
 from app.services import admin as admin_service
 from app.services import bans as bans_service
 from app.services import moderation as moderation_service
@@ -65,6 +66,26 @@ async def set_role(
 ) -> AdminUserOut:
     user = await admin_service.set_role(db, actor, user_id, data.role)
     return AdminUserOut.model_validate(user)
+
+
+@router.delete(
+    "/users/{user_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Удалить пользователя (admin): только user и moderator",
+    description=(
+        "Админа удалить нельзя (403), себя — через DELETE /api/me с паролем (403 здесь); "
+        "последнего администратора — никак (409). Действие пишется в журнал модерации."
+    ),
+    responses={
+        403: err("Недостаточно прав: роль цели или сам себя"),
+        404: err("Пользователь не найден"),
+        409: err("Последний администратор"),
+        503: err("Пользователь сейчас изменяется — повторить (Retry-After)"),
+    },
+)
+async def delete_user(user_id: uuid.UUID, actor: AdminUser, db: DbSession) -> Response:
+    await accounts_service.delete_by_admin(db, actor, user_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 # --- Бан (moderator и admin; кто кого — policies.can_ban / can_unban) ----------------------

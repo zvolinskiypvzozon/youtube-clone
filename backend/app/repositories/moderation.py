@@ -74,16 +74,16 @@ async def video_owner(db: AsyncSession, video_id: uuid.UUID) -> uuid.UUID | None
 
 
 async def report_target_owner(db: AsyncSession, report: Report) -> uuid.UUID | None:
-    """Владелец видео, на которое жалоба: по видео, а для удалённого видео — по снимку handle
-    канала (handle неизменяем). None — канала тоже нет."""
+    """Владелец видео, на которое жалоба: по видео, а для удалённого видео — по снимку
+    channel_id (день 9: не по handle — ник удалённого пользователя не должен «приписать»
+    жалобу другому). None — канала тоже нет (пользователь удалён)."""
     if report.video_id is not None:
         owner = await video_owner(db, report.video_id)
         if owner is not None:
             return owner
-    stmt = select(Channel.owner_id).where(
-        func.lower(Channel.handle) == func.lower(report.channel_handle)
-    )
-    return await db.scalar(stmt)
+    if report.channel_id is None:
+        return None
+    return await db.scalar(select(Channel.owner_id).where(Channel.id == report.channel_id))
 
 
 async def channel_handle(db: AsyncSession, channel_id: uuid.UUID) -> str:

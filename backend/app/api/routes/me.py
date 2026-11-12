@@ -1,17 +1,43 @@
 import uuid
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response, status
 
 from app.api.deps import CurrentUser, Cursor, DbSession, Limit, PlaylistLimit, no_store
+from app.api.routes.auth import clear_auth_cookies
+from app.schemas.auth import AccountDeleteIn
 from app.schemas.common import err
 from app.schemas.playlists import PlaylistPage
 from app.schemas.videos import MySubscriptionPage, MyVideoPage
+from app.services import accounts as accounts_service
 from app.services import playlists as playlists_service
 from app.services import subscriptions as subscriptions_service
 from app.services import videos as videos_service
 
 # Персональные данные и подписанные ссылки — не кэшируются.
 router = APIRouter(prefix="/me", tags=["me"], dependencies=[Depends(no_store)])
+
+
+@router.delete(
+    "",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Удалить свой аккаунт (подтверждение паролем)",
+    description=(
+        "Удаляются канал, видео (и файлы), плейлисты, комментарии, реакции, подписки, сессии. "
+        "Жалобы и журнал модерации остаются без ссылки на пользователя; ник занят навсегда. "
+        "Cookie сессии очищаются. Последнего администратора удалить нельзя (409)."
+    ),
+    responses={
+        401: err("Требуется вход"),
+        403: err("Неверный пароль или CSRF-токен"),
+        409: err("Последний администратор"),
+        503: err("Аккаунт сейчас изменяется — повторить (Retry-After)"),
+    },
+)
+async def delete_me(data: AccountDeleteIn, user: CurrentUser, db: DbSession) -> Response:
+    await accounts_service.delete_self(db, user, data.password)
+    response = Response(status_code=status.HTTP_204_NO_CONTENT)
+    clear_auth_cookies(response)
+    return response
 
 
 @router.get(

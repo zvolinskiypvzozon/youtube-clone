@@ -39,6 +39,8 @@ class Report(UUIDPk, CreatedAt, Base):
         Index("ix_reports_video", "video_id"),
         # SET NULL при удалении пользователя (день 9).
         Index("ix_reports_reporter", "reporter_id"),
+        # Очередь модератора: жалобы на удалённые видео своего канала — по снимку channel_id.
+        Index("ix_reports_channel", "channel_id"),
         # Потолок открытых жалоб пользователя (шаг 2 дня 6): подсчёт читает не больше 20 строк,
         # а не всю историю жалоб (ревью шага 2).
         Index(
@@ -58,6 +60,11 @@ class Report(UUIDPk, CreatedAt, Base):
     comment: Mapped[str | None] = mapped_column(Text)
     video_title: Mapped[str] = mapped_column(String(100), nullable=False)
     channel_handle: Mapped[str] = mapped_column(String(30), nullable=False)
+    # Снимок канала видео на момент жалобы — без внешнего ключа (переживает удаление видео и
+    # пользователя). «Своё видео» модератора для удалённого видео — по нему, а не по handle:
+    # ник удалённого пользователя навсегда занят, но сравнение по id не зависит и от этого
+    # (ADR 0006 доп. 6, день 9). NULL — только у жалоб, чей канал уже удалён до миграции.
+    channel_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     status: Mapped[ReportStatus] = mapped_column(
         pg_enum(ReportStatus, "report_status"),
         nullable=False,

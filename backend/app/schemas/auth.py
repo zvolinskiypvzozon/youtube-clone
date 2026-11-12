@@ -68,3 +68,11 @@ class MeOut(BaseModel):
 class TokenOut(BaseModel):
     access_token: str
     token_type: str = "bearer"  # noqa: S105 — тип токена по RFC 6750, не секрет
+
+
+class AccountDeleteIn(BaseModel):
+    """Удаление своего аккаунта: подтверждение паролем (решение архитектора дня 9)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    password: str = Field(min_length=1, max_length=128)

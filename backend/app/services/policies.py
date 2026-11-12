@@ -39,7 +39,7 @@ private — только владельцу, staff тоже нет: модера
 import uuid
 from dataclasses import dataclass
 
-from sqlalchemy import ColumnElement, and_, exists, func, literal_column, or_, select, true
+from sqlalchemy import ColumnElement, and_, exists, literal_column, or_, select, true
 from sqlalchemy.orm import aliased
 
 from app.models import (
@@ -184,6 +184,18 @@ def can_ban(
     return target_role == UserRole.moderator and actor_role == UserRole.admin
 
 
+def can_delete_user(
+    actor_id: uuid.UUID, actor_role: UserRole | None, target_id: uuid.UUID, target_role: UserRole
+) -> bool:
+    """Удаление чужого аккаунта (решение архитектора дня 9): только админ и только user или
+    moderator; админа — никто; себя — через DELETE /api/me с паролем, не этим путём."""
+    return (
+        actor_role == UserRole.admin
+        and actor_id != target_id
+        and target_role in (UserRole.user, UserRole.moderator)
+    )
+
+
 def can_unban(
     actor_id: uuid.UUID,
     actor_role: UserRole | None,
@@ -267,17 +279,13 @@ def owned_filter(viewer: User) -> ColumnElement[bool]:
 def moderation_queue_filter(viewer: User) -> ColumnElement[bool]:
     """SQL-аналог can_moderate для очереди жалоб (Report внешне соединён с Video): админ видит
     все; модератор — кроме жалоб на свои видео. Для удалённого видео (video_id NULL) свой —
-    по снимку handle канала (handle неизменяем)."""
+    по снимку channel_id (день 9: не по handle, см. report_target_owner)."""
     if viewer.role == UserRole.admin:
         return true()
     own_channel = select(Channel.id).where(Channel.owner_id == viewer.id).scalar_subquery()
-    own_handle = select(Channel.handle).where(Channel.owner_id == viewer.id).scalar_subquery()
     return or_(
         and_(Report.video_id.is_not(None), Video.channel_id.is_distinct_from(own_channel)),
-        and_(
-            Report.video_id.is_(None),
-            func.lower(Report.channel_handle).is_distinct_from(func.lower(own_handle)),
-        ),
+        and_(Report.video_id.is_(None), Report.channel_id.is_distinct_from(own_channel)),
     )
 
 

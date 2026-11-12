@@ -129,3 +129,18 @@ class Subscription(CreatedAt, Base):
     user_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
     )
+
+
+class RetiredUsername(Base):
+    """Ник удалённого пользователя — занят навсегда (решение архитектора дня 9): по старым
+    ссылкам /channel/<ник>, в снимках жалоб и журнале не появится другой человек. Хранится
+    только ник: email и прочие персональные данные удалённого не сохраняются, повторная
+    регистрация с тем же email под другим ником разрешена. citext — без учёта регистра, как
+    users.username."""
+
+    __tablename__ = "retired_usernames"
+
+    username: Mapped[str] = mapped_column(CITEXT, primary_key=True)
+    retired_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()"), nullable=False
+    )
