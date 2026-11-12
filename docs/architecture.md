@@ -24,7 +24,7 @@
 ```mermaid
 flowchart LR
     B[Браузер] -->|:80| W[web: nginx<br/>SPA + reverse proxy]
-    W -->|/api, /docs| A[api: FastAPI]
+    W -->|/api, /openapi.json| A[api: FastAPI]
     W -->|/yt-raw, /yt-media<br/>presigned| S[(storage: silo<br/>S3 API)]
     A --> P[(postgres)]
     A -->|boto3| S
@@ -36,7 +36,7 @@ flowchart LR
 
 | Сервис | Образ | Назначение |
 |---|---|---|
-| `web` | nginx-unprivileged 1.27 + собранная SPA | Единственный публичный порт. Отдаёт SPA, проксирует API, Swagger и presigned-запросы к хранилищу, применяет rate limit и заголовки безопасности |
+| `web` | nginx-unprivileged 1.28.2 + собранная SPA | Единственный публичный порт. Отдаёт SPA и Swagger UI (`/docs`, своими файлами, без CDN), проксирует API, `/openapi.json` и presigned-запросы к хранилищу, применяет rate limit и заголовки безопасности |
 | `api` | python 3.12-slim | FastAPI, uvicorn (2 воркера). Слои: routes → services → repositories |
 | `worker` | тот же код + ffmpeg | Обработка видео. Задачи берёт из таблицы в Postgres (`FOR UPDATE SKIP LOCKED`) |
 | `postgres` | postgres 17-alpine | Метаданные, сессии, очередь задач |
