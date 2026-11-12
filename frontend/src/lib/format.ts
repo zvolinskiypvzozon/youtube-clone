@@ -17,6 +17,24 @@ export function formatViews(count: number): string {
   return `${count} ${VIEW_FORMS[plural.select(count)]}`;
 }
 
+const SUBSCRIBER_FORMS: Record<string, string> = {
+  one: "подписчик",
+  few: "подписчика",
+  many: "подписчиков",
+  other: "подписчика",
+};
+
+/** «1 подписчик», «3 подписчика», «25 подписчиков», «1,2 тыс. подписчиков». */
+export function formatSubscribers(count: number): string {
+  if (count >= 1000) return `${compact.format(count)} подписчиков`;
+  return `${count} ${SUBSCRIBER_FORMS[plural.select(count)]}`;
+}
+
+/** Целое число с разделением разрядов: «12 345». */
+export function formatCount(count: number): string {
+  return count.toLocaleString("ru-RU");
+}
+
 /** 0:05, 12:34, 1:02:03. */
 export function formatDuration(totalSeconds: number): string {
   const s = Math.max(0, Math.floor(totalSeconds));

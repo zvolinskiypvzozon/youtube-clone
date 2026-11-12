@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatDuration, formatRelative, formatViews } from "./format";
+import { formatDuration, formatRelative, formatSubscribers, formatViews } from "./format";
 
 describe("формат", () => {
   it("просмотры: склонение и сокращение", () => {
@@ -10,6 +10,14 @@ describe("формат", () => {
     expect(formatViews(21)).toBe("21 просмотр");
     // Intl ставит неразрывный пробел перед «тыс.».
     expect(formatViews(1200)).toMatch(/^1,2\sтыс\. просмотров$/);
+  });
+
+  it("подписчики: склонение и сокращение", () => {
+    expect(formatSubscribers(0)).toBe("0 подписчиков");
+    expect(formatSubscribers(1)).toBe("1 подписчик");
+    expect(formatSubscribers(4)).toBe("4 подписчика");
+    expect(formatSubscribers(12)).toBe("12 подписчиков");
+    expect(formatSubscribers(1500)).toMatch(/^1,5\sтыс\. подписчиков$/);
   });
 
   it("длительность", () => {

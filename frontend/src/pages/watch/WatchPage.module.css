@@ -1,0 +1,242 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 1280px;
+  margin: 0 auto;
+  min-width: 0;
+}
+
+.placeholder {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 16 / 9;
+  border-radius: 12px;
+  background: var(--bg-subtle);
+}
+
+.title {
+  margin: 4px 0 0;
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 28px;
+}
+
+.bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.channel {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.avatar {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--avatar);
+  color: #fff;
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.channelText {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  max-width: 260px;
+}
+
+.channelName {
+  color: var(--text);
+  font-weight: 500;
+  text-decoration: none;
+  line-height: 22px;
+}
+
+.muted {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.reactionsWrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.reactions {
+  display: flex;
+  border-radius: 18px;
+  overflow: hidden;
+  background: var(--bg-subtle);
+}
+
+.reaction {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 14px;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.reaction + .reaction {
+  border-left: 1px solid var(--border-strong);
+}
+
+.reaction:hover:not(:disabled) {
+  background: var(--hover);
+}
+
+.reaction:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.description {
+  padding: 12px;
+  border-radius: 12px;
+  background: var(--bg-subtle);
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.meta {
+  margin: 0 0 4px;
+  font-weight: 500;
+}
+
+.preWrap {
+  white-space: pre-wrap;
+}
+
+.linkButton {
+  margin-top: 4px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.stateBox {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  font-size: 14px;
+}
+
+.stateBox p {
+  margin: 0;
+}
+
+.badge {
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: var(--bg-subtle);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.danger {
+  color: var(--danger);
+}
+
+.inlineError {
+  margin: 0;
+  color: var(--danger);
+  font-size: 13px;
+}
+
+.notice {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+
+.secondary {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.report {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(100%, 480px);
+  padding: 16px;
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+}
+
+.reportFieldset {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  border: none;
+}
+
+.reportFieldset legend {
+  margin-bottom: 6px;
+  font-weight: 500;
+}
+
+.radio {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+}
+
+.fieldLabel {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.textarea {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  font: inherit;
+  font-size: 14px;
+  resize: vertical;
+}
+
+.counter {
+  align-self: flex-end;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.formActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}

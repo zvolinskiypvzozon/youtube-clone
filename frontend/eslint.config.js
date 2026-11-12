@@ -31,6 +31,18 @@ const UNSAFE_HTML = [
     message: "href/src из выражения — только через safeUrl() (src/lib/safeUrl.ts).",
   },
   {
+    // То же для DOM-свойств и setAttribute в обход JSX (аудит дня 8): video.src = …,
+    // el.setAttribute("href", …). Справа — только safeUrl/requireSafeUrl.
+    selector:
+      "AssignmentExpression[left.type='MemberExpression'][left.property.name=/^(src|href|action|formAction|poster)$/] > :not(CallExpression[callee.name=/^(safeUrl|requireSafeUrl)$/]).right",
+    message: "src/href из выражения — только через safeUrl()/requireSafeUrl() (src/lib/safeUrl.ts).",
+  },
+  {
+    selector:
+      "CallExpression[callee.property.name='setAttribute'][arguments.0.value=/^(src|href|action|formaction|poster|xlink:href)$/i] > :not(CallExpression[callee.name=/^(safeUrl|requireSafeUrl)$/]).arguments:nth-child(2)",
+    message: "setAttribute для src/href — только через safeUrl()/requireSafeUrl().",
+  },
+  {
     selector: "JSXAttribute[name.name='srcDoc']",
     message: "Запрещено: srcDoc — HTML строкой во фрейме.",
   },

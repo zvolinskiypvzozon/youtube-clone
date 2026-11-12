@@ -17,3 +17,14 @@ export function hasUnsafeUrlChars(value: string): boolean {
   }
   return false;
 }
+
+/**
+ * Для присваивания DOM-свойству (video.src = …): ESLint пропускает в src/href/poster только
+ * safeUrl/requireSafeUrl. Значение уже проверено safeUrl — небезопасное здесь означает ошибку
+ * в коде, поэтому исключение, а не тихая подстановка.
+ */
+export function requireSafeUrl(value: string): string {
+  const url = safeUrl(value);
+  if (url === undefined) throw new Error("Небезопасный URL");
+  return url;
+}

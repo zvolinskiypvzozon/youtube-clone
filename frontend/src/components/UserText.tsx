@@ -10,6 +10,7 @@ interface Props {
   lines?: number;
   className?: string;
   title?: boolean;
+  id?: string;
 }
 
 /**
@@ -18,11 +19,11 @@ interface Props {
  * направления — RTL-текст не «перетекает» в соседний интерфейс; обрезка переполнения против
  * нагромождения комбинирующих знаков (аудит шага 1 дня 6).
  */
-export function UserText({ text, as: Tag = "span", lines, className, title }: Props) {
+export function UserText({ text, as: Tag = "span", lines, className, title, id }: Props) {
   const style = lines ? ({ "--lines": lines } as CSSProperties) : undefined;
   const classes = [styles.text, lines ? styles.clamped : "", className ?? ""].filter(Boolean).join(" ");
   return (
-    <Tag dir="auto" className={classes} style={style} title={title ? text : undefined}>
+    <Tag id={id} dir="auto" className={classes} style={style} title={title ? text : undefined}>
       {text}
     </Tag>
   );

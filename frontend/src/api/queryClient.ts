@@ -28,5 +28,23 @@ function onUnauthorized(client: QueryClient, error: unknown): void {
   if (!(error instanceof ApiError && error.status === 401)) return;
   const wasLoggedIn = Boolean(client.getQueryData(ME_KEY));
   client.setQueryData(ME_KEY, null);
-  if (wasLoggedIn) void client.resetQueries({ predicate: (q) => q.queryKey[0] !== ME_KEY[0] });
+  if (wasLoggedIn) void resetSessionData(client);
+}
+
+/**
+ * Открытая страница видео при смене сессии не сбрасывается, а перезапрашивается: иначе плеер
+ * размонтировался бы — позиция потеряна, просмотр засчитан повторно (ревью дня 8). Ответ под
+ * новой сессией заменит my_reaction и state; 404 — страница «Видео недоступно». Ссылки потока
+ * не перезапрашиваются (смена src сбросила бы буфер): при истечении плеер запросит их сам.
+ */
+const KEEP_ACTIVE = new Set<unknown>(["video", "stream"]);
+
+/** Сброс данных прежней сессии (вход, выход, 401). */
+export async function resetSessionData(client: QueryClient): Promise<void> {
+  const kept = (key: readonly unknown[]) => KEEP_ACTIVE.has(key[0]);
+  // Неактивные карточки и ссылки прежней сессии — удалить: при следующем открытии они
+  // показали бы чужие my_reaction/state до ответа сервера.
+  client.removeQueries({ predicate: (q) => kept(q.queryKey) && !q.isActive() });
+  await client.resetQueries({ predicate: (q) => q.queryKey[0] !== ME_KEY[0] && !kept(q.queryKey) });
+  await client.invalidateQueries({ queryKey: ["video"] });
 }

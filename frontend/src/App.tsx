@@ -9,6 +9,7 @@ import { HomePage } from "./pages/HomePage";
 import { LoginPage } from "./pages/LoginPage";
 import { ComingSoonPage, NotFoundPage } from "./pages/PlaceholderPages";
 import { RegisterPage } from "./pages/RegisterPage";
+import { WatchPage } from "./pages/watch/WatchPage";
 
 export function AppRoutes() {
   return (
@@ -17,7 +18,7 @@ export function AppRoutes() {
         <Route index element={<HomePage />} />
         <Route path="login" element={<LoginPage />} />
         <Route path="register" element={<RegisterPage />} />
-        <Route path="watch/:videoId" element={<ComingSoonPage title="Просмотр видео" />} />
+        <Route path="watch/:videoId" element={<WatchPage />} />
         <Route path="channel/:handle" element={<ComingSoonPage title="Канал" />} />
         <Route
           path="upload"

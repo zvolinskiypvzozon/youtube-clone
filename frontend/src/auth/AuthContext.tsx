@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import * as authApi from "../api/auth";
 import { ApiError } from "../api/client";
-import { ME_KEY } from "../api/queryClient";
+import { ME_KEY, resetSessionData } from "../api/queryClient";
 import type { LoginIn, Me, RegisterIn } from "../api/types";
 
 interface AuthState {
@@ -41,7 +41,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     async (user: Me | null) => {
       await queryClient.cancelQueries({ queryKey: ME_KEY });
       queryClient.setQueryData(ME_KEY, user);
-      await queryClient.resetQueries({ predicate: (q) => q.queryKey[0] !== ME_KEY[0] });
+      await resetSessionData(queryClient);
     },
     [queryClient],
   );
